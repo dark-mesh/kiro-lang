@@ -1,0 +1,8 @@
+var sum = 0
+loop x in 0..10 per 2 on (x != 4) {
+    print x
+    sum = sum + x
+} off {
+    print 999
+}
+print sum

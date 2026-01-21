@@ -58,7 +58,30 @@ impl Interpreter {
                 }
                 Ok(())
             }
+            Statement::On { condition, body, else_clause, .. } => {
+                // 1. Evaluate the condition (returns 1 for True, 0 for False)
+                let result = self.eval_expr(condition)?;
+
+                if result != 0 {
+                    // True: Run the main block
+                    self.execute_block(body)?;
+                } else {
+                    // False: Run the 'off' block (if it exists)
+                    if let Some(clause) = else_clause {
+                        self.execute_block(clause.body)?;
+                    }
+                }
+                Ok(())
+            }
+            _ => todo!()
         }
+    }
+    fn execute_block(&mut self, block: grammar::Block) -> Result<(), String> {
+        for statement in block.statements {
+            // Recursion: A block is just a list of statements!
+            self.execute_statement(statement)?; 
+        }
+        Ok(())
     }
     fn eval_expr(&self, expr: Expression) -> Result<i64,String> {
         match expr {
@@ -72,7 +95,31 @@ impl Interpreter {
             Expression::Sub(lhs, _, rhs) => Ok(self.eval_expr(*lhs)? - self.eval_expr(*rhs)?),
             Expression::Mul(lhs, _, rhs) => Ok(self.eval_expr(*lhs)? * self.eval_expr(*rhs)?),
             Expression::Div(lhs, _, rhs) => Ok(self.eval_expr(*lhs)? / self.eval_expr(*rhs)?),
-
+            Expression::Gt(lhs, _, rhs) => {
+                let val = if self.eval_expr(*lhs)? > self.eval_expr(*rhs)? { 1 } else { 0 };
+                Ok(val)
+            },
+            Expression::Lt(lhs, _, rhs) => {
+                let val = if self.eval_expr(*lhs)? < self.eval_expr(*rhs)? { 1 } else { 0 };
+                Ok(val)
+            },
+            Expression::Eq(lhs, _, rhs) => {
+                let val = if self.eval_expr(*lhs)? == self.eval_expr(*rhs)? { 1 } else { 0 };
+                Ok(val)
+            },
+            Expression::Neq(lhs, _, rhs) => {
+                let val = if self.eval_expr(*lhs)? != self.eval_expr(*rhs)? { 1 } else { 0 };
+                Ok(val)
+            },
+            Expression::Geq(lhs, _, rhs) => {
+                let val = if self.eval_expr(*lhs)? >= self.eval_expr(*rhs)? { 1 } else { 0 };
+                Ok(val)
+            },
+            Expression::Leq(lhs, _, rhs) => {
+                let val = if self.eval_expr(*lhs)? <= self.eval_expr(*rhs)? { 1 } else { 0 };
+                Ok(val)
+            },
+            _ => todo!()
         }
     }
 }
