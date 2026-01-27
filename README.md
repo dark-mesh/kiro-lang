@@ -1,4 +1,4 @@
-# 🥝 Kiro Language
+# 🌀 Kiro Language
 
 **Kiro** is a modern, experimental programming language designed to explore the intersection of high-level expressivity and low-level performance concepts. It features a dual-execution model (Interpreter + Transpiler to Rust) and introduces unique syntax for flow control and concurrency.
 
@@ -58,8 +58,70 @@ Kiro uses a "sane default" approach to mutability.
 - `bool`: Booleans (`true`, `false`).
 - `adr`: Addresses/Pointers.
 - `pipe`: Channels for asynchronous communication.
+- **Strict Typed Collections**: `list <type>` and `map <key> <val>`.
+- **Structs**: Custom named types (e.g., `User`).
 
-### 2. Control Flow
+#### Operators & Expressions
+
+- **Concatenation**: Use `+` for strings (`"a" + "b"`).
+- **Deep Equality**: `==` and `!=` work deeply for Structs, Lists, and Maps.
+- **Size**: Use `len` to get the length of strings and collections (`len my_list`).
+
+### 2. Structs
+
+Kiro supports custom data structures. Struct names **must** start with a Capital letter, while fields use lowercase.
+
+**Definition** (No commas needed):
+
+```kiro
+struct User {
+    name: str
+    age: num
+    active: bool
+}
+```
+
+**Initialization** (Commas required):
+
+```kiro
+var u = User {
+    name: "Kiro",
+    age: 1,
+    active: true
+}
+print u.name
+```
+
+### 3. Collections
+
+Kiro features strictly typed lists and maps with command-style operations.
+
+#### Lists
+
+**Initialization**:
+
+```kiro
+var numbers = list num { 10, 20, 30 }
+```
+
+**Commands**:
+
+- `at`: Access element by index (`numbers at 0`).
+- `push`: Append an element (`numbers push 40`).
+
+#### Maps
+
+**Initialization** (Comma separated key-value pairs):
+
+```kiro
+var scores = map str num { "Alice" 100, "Bob" 90 }
+```
+
+**Commands**:
+
+- `at`: Access value by key (`scores at "Alice"`).
+
+### 4. Control Flow
 
 #### Conditionals (`on` / `off`)
 
@@ -86,30 +148,32 @@ loop on (x < 5) {
 
 #### For Loop (`loop in`)
 
-The `loop in` construct is extremely powerful, supporting ranges, steps (`per`), and inline filters (`on`).
+The `loop in` construct works with ranges, lists, and even strings. It supports steps (`per`) and inline filters (`on`).
 
 ```kiro
-// Basic loop: 0 to 9
+// Looping over a Range
 loop i in 0..10 {
     print i
 }
 
-// Advanced loop: 0 to 19, step by 2, only keep numbers > 10
+// Looping over a List
+var items = list str { "A", "B", "C" }
+loop item in items {
+    print item
+}
+
+// Advanced loop: Range 0-19, step by 2, only keep numbers > 10
 loop x in 0..20 per 2 on (x > 10) {
     print x
-} off {
-    // Optional block that runs if the filter (on) is false?
-    // (Note: Implementation specific, currently 'off' in loops handles filtered-out items)
 }
 ```
 
-### 3. Functions
+### 5. Functions
 
 Functions are declared with `fn`. Arguments must be typed.
 
 ```kiro
 fn add(a: num, b: num) {
-    // Implicit returns are not fully supported yet, use expressions or assignments.
     print a + b
 }
 
@@ -118,9 +182,11 @@ add(10, 20)
 
 > **Note**: A `pure` keyword exists (`pure fn`) for future strict-mode implementations (side-effect free functions).
 
-### 4. Pointers & Memory (`ref` / `deref`)
+### 6. Pointers & Memory (`ref` / `deref`)
 
 Kiro abstracts away complex memory management while giving you pointer-like behavior. References are thread-safe by default (compiling to `Arc<Mutex<T>>`).
+
+#### Standard Access
 
 ```kiro
 var value = 100
@@ -128,7 +194,19 @@ var ptr = ref value    // Create a reference
 print deref ptr        // Read value (100)
 ```
 
-### 5. Concurrency & Pipes
+#### Auto-Deref (Structs)
+
+When you have a pointer to a struct, you don't need to manually dereference it to access fields. Kiro handles this automatically!
+
+```kiro
+var u = User { name: "Kiro", ... }
+var p = ref u
+
+// Works directly! (No 'deref' needed)
+print p.name
+```
+
+### 7. Concurrency & Pipes
 
 Kiro makes concurrency easy with the `run` keyword and **Pipes** (channels) for communication.
 

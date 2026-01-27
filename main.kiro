@@ -1,53 +1,21 @@
-// 1. Initialize the Pipe
-// 'pipe num' creates a channel for numbers
-var jobs = pipe num
+print "--- TEST: String Concat ---"
+print "Hello " + "World"
 
-// 2. Define the Producer
-// Note: We use 'p: pipe' to match the specific type
-fn producer(p: pipe) {
-    print "🏭 [Producer] Started"
-    
-    // Send 5 items (10, 20, 30, 40, 50)
-    loop i in 1..6 {
-        var val = i * 10
-        print " -> Sending:"
-        print val
-        
-        // Push value into the pipe
-        give p val
-    }
-    
-    // In a real app, we would 'close p' here,
-    // but our current interpreter handles 'close' as a no-op.
-    print "✅ [Producer] Finished"
-}
+print "--- TEST: Len ---"
+print len "abc"
+var l = list num { 10, 20, 30 }
+print len l
 
-// 3. Define the Consumer
-fn consumer(p: pipe) {
-    print "🛒 [Consumer] Started"
-    
-    // We loop exactly 5 times because we know the producer sends 5 items.
-    // (In the future, we will use 'take' inside a 'while' loop with error handling)
-    loop i in 1..6 {
-        var msg = take p
-        
-        print " <- Received:"
-        print msg
-    }
-    
-    print "✅ [Consumer] Finished"
-}
+print "--- TEST: Equality ---"
+var m = list num { 10, 20, 30 }
+print l == m // Expected: 1 (true)
+var k = list num { 99 }
+print l == k // Expected: 0 (false)
+print "hello" == "hello" // Expected: 1
+print "hello" == "world" // Expected: 0
 
-// 4. Run Async Tasks
-// In the Interpreter: This runs Synchronously (Producer finishes, then Consumer starts).
-// In the Compiler: This runs Asynchronously (Threads race).
-run producer(jobs)
-run consumer(jobs)
-
-// 5. Keep Alive (For the Compiled Binary)
-// Since 'run' spawns background threads, the main function might exit 
-// before they finish. This busy-loop keeps the program alive briefly.
-print "⏳ Waiting for tasks..."
-loop wait in 0..10000 {
-    var burn = 1 + 1
+print "--- TEST: Loop List ---"
+var l = list num { 10, 20 }
+loop x in l {
+    print x
 }

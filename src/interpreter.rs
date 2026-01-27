@@ -11,6 +11,9 @@ pub enum RuntimeVal {
     Range(i64, i64),
     Void,
     Pipe(Sender<f64>, Arc<Mutex<Receiver<f64>>>),
+    Struct(String, HashMap<String, RuntimeVal>),
+    List(Vec<RuntimeVal>),
+    Map(HashMap<String, RuntimeVal>),
 }
 
 // Manual implementation to handle Pipe which cannot be compared
@@ -24,6 +27,11 @@ impl PartialEq for RuntimeVal {
             (RuntimeVal::Void, RuntimeVal::Void) => true,
             // Pipes are never equal (identity check is hard without ID)
             (RuntimeVal::Pipe(_, _), RuntimeVal::Pipe(_, _)) => false,
+            // Structs equality
+            (RuntimeVal::Struct(n1, d1), RuntimeVal::Struct(n2, d2)) => n1 == n2 && d1 == d2,
+            // Collections equality
+            (RuntimeVal::List(l1), RuntimeVal::List(l2)) => l1 == l2,
+            (RuntimeVal::Map(m1), RuntimeVal::Map(m2)) => m1 == m2,
             _ => false,
         }
     }
@@ -57,6 +65,9 @@ impl std::fmt::Display for RuntimeVal {
             RuntimeVal::Range(s, e) => write!(f, "{}..{}", s, e),
             RuntimeVal::Void => write!(f, "void"),
             RuntimeVal::Pipe(_, _) => write!(f, "<Pipe>"),
+            RuntimeVal::Struct(name, _) => write!(f, "<Struct {}>", name),
+            RuntimeVal::List(l) => write!(f, "<List len={}>", l.len()),
+            RuntimeVal::Map(m) => write!(f, "<Map len={}>", m.len()),
         }
     }
 }
@@ -84,10 +95,11 @@ impl Interpreter {
     }
     fn execute_statement(&mut self, statement: Statement) -> Result<RuntimeVal, String> {
         match statement {
+            // Struct definitions are just Declarations, no runtime effect in interpreter
+            Statement::StructDef { .. } => Ok(RuntimeVal::Void),
             Statement::Assignment {
                 var_kw,
                 ident,
-                _eq,
                 value,
                 ..
             } => {
@@ -183,58 +195,69 @@ impl Interpreter {
                 else_clause,
                 ..
             } => {
-                // 1. Get the Range
-                let range_val = self.eval_expr(iterable)?;
-                let (start, end) = match range_val {
-                    RuntimeVal::Range(s, e) => (s, e),
+                let iterable_val = self.eval_expr(iterable)?;
+
+                // Vector of items to iterate over
+                let items: Vec<RuntimeVal> = match iterable_val {
+                    RuntimeVal::Range(start, end) => {
+                        // Determine Step (Default 1)
+                        let step_val = if let Some(s) = step {
+                            self.eval_expr(s.value)?.as_float()? as i64
+                        } else {
+                            1
+                        };
+                        let mut vec = Vec::new();
+                        let mut current = start;
+                        while current < end {
+                            vec.push(RuntimeVal::Float(current as f64));
+                            current += step_val;
+                        }
+                        vec
+                    }
+                    RuntimeVal::List(list) => list,
+                    RuntimeVal::String(s) => {
+                        // Iterate over characters as strings
+                        s.chars()
+                            .map(|c| RuntimeVal::String(c.to_string()))
+                            .collect()
+                    }
                     _ => {
                         return Err(
-                            "Loop Error: Can only loop over ranges (e.g., 0..10)".to_string()
+                            "Loop Error: Can only loop over ranges, lists, or strings".to_string()
                         );
                     }
                 };
 
-                // 2. Determine Step (Default 1)
-                let step_val = if let Some(s) = step {
-                    self.eval_expr(s.value)?.as_float()? as i64
-                } else {
-                    1
-                };
-
-                // 3. The Loop Mechanism
-                let mut current = start;
-                while current < end {
+                for item in items {
                     // 1. SAVE the current environment (Parent Scope)
                     let parent_env = self.env.clone();
 
-                    // 2. Define iterator in the CURRENT scope (so the body can see it)
+                    // 2. Define iterator in the CURRENT scope
                     self.env.insert(
                         iterator.clone(),
                         Value {
-                            data: RuntimeVal::Float(current as f64),
+                            data: item, // loop variable is mutable copy
                             is_mutable: false,
                         },
                     );
 
                     // 3. Handle Filter
                     let run_main = if let Some(f) = &filter {
+                        // Check condition
                         self.eval_expr(f.condition.clone())?.as_float()? != 0.0
                     } else {
                         true
                     };
 
-                    // 4. Run Body (Variables defined here will die when we restore env)
+                    // 4. Run Body
                     if run_main {
                         self.execute_block(body.clone())?;
                     } else if let Some(off) = &else_clause {
                         self.execute_block(off.body.clone())?;
                     }
 
-                    // 5. RESTORE the Parent Environment (Wipe loop variables)
+                    // 5. RESTORE Parent Env
                     self.env = parent_env;
-
-                    // C. Increment
-                    current += step_val;
                 }
                 Ok(RuntimeVal::Void)
             }
@@ -289,6 +312,35 @@ impl Interpreter {
     }
     fn eval_expr(&mut self, expr: Expression) -> Result<RuntimeVal, String> {
         match expr {
+            Expression::StructInit(name, _, fields, _) => {
+                // 1. Evaluate all fields
+                let mut data = HashMap::new();
+                for f in fields {
+                    let val = self.eval_expr(f.value)?;
+                    data.insert(f.name.value, val); // FIXED: Unwrap f.name.value
+                }
+                // 2. Return Struct Value
+                Ok(RuntimeVal::Struct(name.value, data)) // FIXED: Unwrap name.value
+            }
+
+            Expression::FieldAccess(target, _, field) => {
+                let val = self.eval_expr(*target)?;
+
+                // AUTO-DEREF LOGIC
+                // Check if it's a struct directly OR a pointer to a struct
+                match val {
+                    RuntimeVal::Struct(_, fields) => fields
+                        .get(&field.value) // FIXED: Unwrap field.value
+                        .cloned()
+                        .ok_or_else(|| format!("Field '{}' not found", field.value)),
+                    // Handle Pointer to Struct (Auto-Deref) could go here
+                    _ => Err(format!(
+                        "Cannot access field '{}' on this type",
+                        field.value
+                    )),
+                }
+            }
+
             // FIXED: Unwrap VariableVal
             Expression::Variable(v) => {
                 self.env
@@ -303,8 +355,11 @@ impl Interpreter {
                 Ok(RuntimeVal::Float(n))
             }
 
-            // FIXED: Unwrap StringVal
-            Expression::StringLit(s) => Ok(RuntimeVal::String(s.value)),
+            // FIXED: Unwrap StringVal and strip quotes
+            Expression::StringLit(s) => {
+                let content = &s.value[1..s.value.len() - 1];
+                Ok(RuntimeVal::String(content.to_string()))
+            }
             Expression::BoolLit(b) => match b {
                 grammar::BoolVal::True(_) => Ok(RuntimeVal::Bool(true)),
                 grammar::BoolVal::False(_) => Ok(RuntimeVal::Bool(false)),
@@ -340,6 +395,56 @@ impl Interpreter {
                 let val = self.eval_expr(*target)?;
                 Ok(val) // "Fake" dereference
             }
+
+            // 2. List Init
+            Expression::ListInit(_, _, _, items, _) => {
+                let mut vec = Vec::new();
+                for i in items {
+                    vec.push(self.eval_expr(i)?);
+                }
+                Ok(RuntimeVal::List(vec))
+            }
+
+            // 3. Map Init
+            Expression::MapInit(_, _, _, _, pairs, _) => {
+                let mut map = HashMap::new();
+                for p in pairs {
+                    let k = self.eval_expr(p.key)?.to_string();
+                    let v = self.eval_expr(p.value)?;
+                    map.insert(k, v);
+                }
+                Ok(RuntimeVal::Map(map))
+            }
+
+            // 4. AT Command
+            Expression::At(col, _, key_expr) => {
+                let collection = self.eval_expr(*col)?;
+                let key = self.eval_expr(*key_expr)?;
+
+                match collection {
+                    RuntimeVal::List(vec) => {
+                        let idx = key.as_float()? as usize;
+                        vec.get(idx)
+                            .cloned()
+                            .ok_or_else(|| "Index out of bounds".to_string())
+                    }
+                    RuntimeVal::Map(map) => {
+                        let k_str = key.to_string();
+                        map.get(&k_str)
+                            .cloned()
+                            .ok_or_else(|| "Key not found".to_string())
+                    }
+                    _ => Err("Cannot use 'at' on this type".to_string()),
+                }
+            }
+
+            // 5. PUSH Command (Interpreter Warning)
+            Expression::Push(col_expr, _, val_expr) => {
+                println!("⚠️ Interpreter: 'push' ignored (compile to Rust for mutation).");
+                let _ = self.eval_expr(*col_expr)?;
+                let _ = self.eval_expr(*val_expr)?;
+                Ok(RuntimeVal::Void)
+            }
             Expression::Range(start, _, end) => {
                 let s = self.eval_expr(*start)?.as_float()? as i64;
                 let e = self.eval_expr(*end)?.as_float()? as i64;
@@ -350,9 +455,18 @@ impl Interpreter {
                 let r = self.eval_expr(*rhs)?;
                 match (l, r) {
                     (RuntimeVal::Float(a), RuntimeVal::Float(b)) => Ok(RuntimeVal::Float(a + b)),
-                    _ => Err("Runtime Error: Can only ADD numbers".to_string()),
+                    (RuntimeVal::String(a), RuntimeVal::String(b)) => {
+                        Ok(RuntimeVal::String(format!("{}{}", a, b)))
+                    }
+                    _ => Err("Runtime Error: Can only ADD numbers or strings".to_string()),
                 }
             }
+            Expression::Len(_, expr) => match self.eval_expr(*expr)? {
+                RuntimeVal::String(s) => Ok(RuntimeVal::Float(s.len() as f64)),
+                RuntimeVal::List(l) => Ok(RuntimeVal::Float(l.len() as f64)),
+                RuntimeVal::Map(m) => Ok(RuntimeVal::Float(m.len() as f64)),
+                _ => Err("Runtime Error: 'len' only supports string, list, map.".to_string()),
+            },
             Expression::Sub(lhs, _, rhs) => {
                 let l = self.eval_expr(*lhs)?;
                 let r = self.eval_expr(*rhs)?;

@@ -25,6 +25,64 @@ impl Compiler {
                 tx: async_channel::Sender<T>,
                 rx: async_channel::Receiver<T>,
             }
+
+            // --- HELPER TRAIT FOR AUTO-DEREF ---
+            trait KiroGet {
+                type Inner;
+                fn kiro_get<R>(&self, f: impl FnOnce(&Self::Inner) -> R) -> R;
+            }
+
+            // Pointer (e.g., Arc<Mutex<User>>)
+            impl<T> KiroGet for std::sync::Arc<std::sync::Mutex<T>> {
+                type Inner = T;
+                fn kiro_get<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+                    let guard = self.lock().unwrap();
+                    f(&*guard)
+                }
+            }
+
+            // --- KIRO AT TRAIT (Access Command) ---
+            trait KiroAt<I, O> { fn kiro_at(&self, index: I) -> O; }
+
+            // List Implementation: list at 0
+            impl<T: Clone> KiroAt<f64, T> for Vec<T> {
+                fn kiro_at(&self, index: f64) -> T {
+                    self.get(index as usize).cloned().expect("Index out of bounds")
+                }
+            }
+
+            // Map Implementation: map at "key"
+            impl<K, V> KiroAt<K, V> for std::collections::HashMap<K, V> 
+            where K: std::hash::Hash + Eq + Clone, V: Clone {
+                fn kiro_at(&self, key: K) -> V {
+                    self.get(&key).cloned().expect("Key not found")
+                }
+            }
+
+            // --- KIRO ADD (String Concatenation vs Math) ---
+            trait KiroAdd<Rhs = Self> { type Output; fn kiro_add(self, rhs: Rhs) -> Self::Output; }
+            impl KiroAdd for f64 { type Output = f64; fn kiro_add(self, rhs: f64) -> f64 { self + rhs } }
+            impl KiroAdd for String { type Output = String; fn kiro_add(self, rhs: String) -> String { format!("{}{}", self, rhs) } }
+
+            // --- KIRO LEN ---
+            trait KiroLen { fn kiro_len(&self) -> f64; }
+            impl<T> KiroLen for Vec<T> { fn kiro_len(&self) -> f64 { self.len() as f64 } }
+            impl<K, V> KiroLen for std::collections::HashMap<K, V> { fn kiro_len(&self) -> f64 { self.len() as f64 } }
+            impl KiroLen for String { fn kiro_len(&self) -> f64 { self.len() as f64 } }
+
+            // --- KIRO ITER (Looping) ---
+            trait KiroIter { type Item; type IntoIter: Iterator<Item = Self::Item>; fn kiro_iter(self) -> Self::IntoIter; }
+            impl KiroIter for std::ops::Range<i64> { type Item = i64; type IntoIter = std::ops::Range<i64>; fn kiro_iter(self) -> Self::IntoIter { self } }
+            impl<T> KiroIter for Vec<T> { type Item = T; type IntoIter = std::vec::IntoIter<T>; fn kiro_iter(self) -> Self::IntoIter { self.into_iter() } }
+            impl KiroIter for String { type Item = char; type IntoIter = std::vec::IntoIter<char>; fn kiro_iter(self) -> Self::IntoIter { self.chars().collect::<Vec<_>>().into_iter() } }
+
+            // --- AS KIRO LOOP VAR (Type Correction) ---
+            trait AsKiroLoopVar { type Out; fn as_kiro(self) -> Self::Out; }
+            impl AsKiroLoopVar for i64 { type Out = f64; fn as_kiro(self) -> f64 { self as f64 } }
+            impl AsKiroLoopVar for f64 { type Out = f64; fn as_kiro(self) -> f64 { self } }
+            impl AsKiroLoopVar for char { type Out = String; fn as_kiro(self) -> String { self.to_string() } }
+            impl AsKiroLoopVar for String { type Out = String; fn as_kiro(self) -> String { self } }
+
         "#,
         );
         output.push_str("#[tokio::main]\nasync fn main(){\n");
@@ -44,11 +102,37 @@ impl Compiler {
             // Since our 'Adr' type in grammar is generic-less, we assume generic runtime value
             // or we might need to cast. For now, let's map it to a dynamic pointer.
             grammar::KiroType::Adr => "std::sync::Arc<std::sync::Mutex<f64>>".to_string(), // Simplified for v1
+
             grammar::KiroType::Pipe => "KiroPipe<f64>".to_string(),
+
+            // Recursive Generics
+            grammar::KiroType::List(_, inner) => format!("Vec<{}>", self.compile_type(inner)),
+            grammar::KiroType::Map(_, k, v) => format!(
+                "std::collections::HashMap<{}, {}>",
+                self.compile_type(k),
+                self.compile_type(v)
+            ),
+
+            // Map Custom Types directly to Rust Struct names
+            grammar::KiroType::Custom(s) => s.value.clone(),
         }
     }
     fn compile_statement(&mut self, statement: Statement) -> String {
         match statement {
+            // 1. Compile Struct Definition
+            Statement::StructDef { name, fields, .. } => {
+                let field_strs: Vec<String> = fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.name.value, self.compile_type(&f.field_type)))
+                    .collect();
+
+                // We add #[derive(Clone, Debug, PartialEq)] and impl KiroGet
+                format!(
+                    "#[derive(Clone, Debug, PartialEq)]\nstruct {0} {{ {1} }}\nimpl KiroGet for {0} {{ type Inner = Self; fn kiro_get<R>(&self, f: impl FnOnce(&Self::Inner) -> R) -> R {{ f(self) }} }}",
+                    name.value,
+                    field_strs.join(", ")
+                )
+            }
             Statement::Assignment {
                 var_kw,
                 ident,
@@ -111,14 +195,15 @@ impl Compiler {
                 else_clause,
                 ..
             } => {
-                let mut range_str = self.compile_expr(iterable);
+                let range_str = self.compile_expr(iterable);
 
                 // Handle "per 5" -> .step_by(5)
-                if let Some(s) = step {
+                let iter_call = if let Some(s) = step {
                     let step_val = self.compile_expr(s.value);
-                    // Wrap in parens to ensure (0..10).step_by(5)
-                    range_str = format!("({}).step_by({} as usize)", range_str, step_val);
-                }
+                    format!("{}.kiro_iter().step_by({} as usize)", range_str, step_val)
+                } else {
+                    format!("{}.kiro_iter()", range_str)
+                };
 
                 // Handle "on (cond)" -> Inject 'if/else' inside the loop body
                 let inner_logic = if let Some(f) = filter {
@@ -137,13 +222,11 @@ impl Compiler {
                 };
 
                 // Implicit Mutability Rule:
-                // Since this is a loop, we register 'iterator' as a known var to avoid conflicts,
-                // but in Rust loops, the iterator is declared implicitly.
                 self.known_vars.insert(iterator.clone());
 
                 format!(
-                    "for {}_i64 in {} {{ let {} = {}_i64 as f64; {} }}",
-                    iterator, range_str, iterator, iterator, inner_logic
+                    "for {}_temp in {} {{ let {} = {}_temp.as_kiro(); {} }}",
+                    iterator, iter_call, iterator, iterator, inner_logic
                 )
             }
             Statement::FunctionDef {
@@ -188,6 +271,29 @@ impl Compiler {
         match expr {
             Expression::Variable(v) => v.value,
 
+            // 2. Compile Struct Init
+            Expression::StructInit(name, _, fields, _) => {
+                let init_strs: Vec<String> = fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.name.value, self.compile_expr(f.value.clone())))
+                    .collect();
+
+                format!("{} {{ {} }}", name.value, init_strs.join(", "))
+            }
+
+            // 3. Compile Field Access
+            // Rust supports auto-deref for dot operator on many types.
+            // If it's a raw struct: user.name works.
+            // If it's a reference:            // 3. Compile Field Access
+            Expression::FieldAccess(target, _, field) => {
+                // Use helper trait for Auto-Deref
+                format!(
+                    "{}.kiro_get(|v| v.{}.clone())",
+                    self.compile_expr(*target),
+                    field.value
+                )
+            }
+
             // FIXED: Unwrap NumberVal
             Expression::Number(num_val) => {
                 let n: f64 = num_val.value.parse().unwrap();
@@ -226,11 +332,55 @@ impl Compiler {
                 // We lock the mutex, unwrap the result (crash on poison), and dereference the guard
                 format!("*({}.lock().unwrap())", ptr)
             }
+
+            // 2. List Init -> vec![...]
+            Expression::ListInit(_, _, _, items, _) => {
+                let elems: Vec<String> =
+                    items.iter().map(|e| self.compile_expr(e.clone())).collect();
+                format!("vec![{}]", elems.join(", "))
+            }
+
+            // 3. Map Init -> HashMap::from(...)
+            Expression::MapInit(_, _, _, _, pairs, _) => {
+                let entries: Vec<String> = pairs
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "({}, {})",
+                            self.compile_expr(p.key.clone()),
+                            self.compile_expr(p.value.clone())
+                        )
+                    })
+                    .collect();
+                format!("std::collections::HashMap::from([{}])", entries.join(", "))
+            }
+
+            // 4. 'at' Command
+            Expression::At(col, _, key) => {
+                format!(
+                    "{}.kiro_at({})",
+                    self.compile_expr(*col),
+                    self.compile_expr(*key)
+                )
+            }
+
+            // 5. 'push' Command
+            Expression::Push(list, _, val) => {
+                format!(
+                    "{}.push({})",
+                    self.compile_expr(*list),
+                    self.compile_expr(*val)
+                )
+            }
+
             Expression::Add(lhs, _, rhs) => format!(
-                "({} + {})",
+                "({}.kiro_add({}))",
                 self.compile_expr(*lhs),
                 self.compile_expr(*rhs)
             ),
+            Expression::Len(_, expr) => {
+                format!("{}.kiro_len()", self.compile_expr(*expr))
+            }
             Expression::Sub(lhs, _, rhs) => format!(
                 "({} - {})",
                 self.compile_expr(*lhs),
