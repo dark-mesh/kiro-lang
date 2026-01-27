@@ -1,7 +1,9 @@
-use kiro_lang::build_manager::BuildManager;
-use kiro_lang::grammar;
-use kiro_lang::interpreter;
-use kiro_lang::compiler;
+mod build_manager;
+mod compiler;
+mod grammar;
+mod interpreter;
+
+use crate::build_manager::BuildManager;
 
 use std::fs;
 
@@ -23,7 +25,7 @@ async fn main() {
             println!("🤖 --- INTERPRETER OUTPUT ---");
             let mut engine = interpreter::Interpreter::new();
             // We re-parse specifically for the interpreter to avoid ownership headaches
-            let interpreter_prog = grammar::parse(&source).unwrap(); 
+            let interpreter_prog = grammar::parse(&source).unwrap();
             if let Err(e) = engine.run(interpreter_prog) {
                 eprintln!("Interpreter Error: {}", e);
             }

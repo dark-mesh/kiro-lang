@@ -1,6 +1,3 @@
-pub mod build_manager;
-pub mod compiler;
-pub mod interpreter;
 #[rust_sitter::grammar("kiro")]
 pub mod grammar {
     #[rust_sitter::language]
@@ -128,15 +125,22 @@ pub mod grammar {
             #[rust_sitter::leaf(text = "}")]
             _r: (),
         },
-        Assignment {
+        // 1. Variable Declaration: var x = 10
+        VarDecl {
             #[rust_sitter::leaf(text = "var")]
-            var_kw: Option<()>,
+            _var: (),
             #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
             ident: String,
             #[rust_sitter::leaf(text = "=")]
             _eq: (),
-
             value: Expression,
+        },
+        // 2. Assignment (Mutation): x = 10 OR x.y = 10
+        AssignStmt {
+            lhs: Expression,
+            #[rust_sitter::leaf(text = "=")]
+            _eq: (),
+            rhs: Expression,
         },
         On {
             #[rust_sitter::leaf(text = "on")]
@@ -214,6 +218,13 @@ pub mod grammar {
             #[rust_sitter::leaf(text = "close")] (),
             Expression, // Channel
         ),
+        // 3. Return Statement
+        Return(#[rust_sitter::leaf(text = "return")] (), Expression),
+        // 4. Break Statement
+        Break(#[rust_sitter::leaf(text = "break")] ()),
+        // 5. Continue Statement
+        Continue(#[rust_sitter::leaf(text = "continue")] ()),
+
         ExprStmt(Expression),
         Print(#[rust_sitter::leaf(text = "print")] (), Expression),
     }
@@ -237,7 +248,7 @@ pub mod grammar {
         #[rust_sitter::prec_left(1)]
         ListInit(
             #[rust_sitter::leaf(text = "list")] (),
-            KiroType, // The inner type (e.g. num)
+            #[allow(dead_code)] KiroType, // The inner type (e.g. num)
             #[rust_sitter::leaf(text = "{")] (),
             #[rust_sitter::delimited(#[rust_sitter::leaf(text = ",")] ())] Vec<Expression>,
             #[rust_sitter::leaf(text = "}")] (),
@@ -248,8 +259,8 @@ pub mod grammar {
         #[rust_sitter::prec_left(1)]
         MapInit(
             #[rust_sitter::leaf(text = "map")] (),
-            KiroType, // Key Type
-            KiroType, // Value Type
+            #[allow(dead_code)] KiroType, // Key Type
+            #[allow(dead_code)] KiroType, // Value Type
             #[rust_sitter::leaf(text = "{")] (),
             #[rust_sitter::delimited(#[rust_sitter::leaf(text = ",")] ())] Vec<MapPair>,
             #[rust_sitter::leaf(text = "}")] (),
@@ -401,6 +412,7 @@ pub mod grammar {
         ),
     }
     #[rust_sitter::extra]
+    #[allow(dead_code)]
     pub struct Whitespace {
         #[rust_sitter::leaf(pattern = r"\s+|//[^\n]*")]
         _whitespace: (),
@@ -437,3 +449,4 @@ pub mod grammar {
         _r: (),
     }
 }
+pub use grammar::*;

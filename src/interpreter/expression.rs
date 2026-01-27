@@ -1,326 +1,22 @@
-use crate::grammar::{self, Expression, Statement};
+use super::Interpreter;
+use super::values::RuntimeVal;
+use crate::grammar::grammar::{self, Expression, Statement};
 use std::collections::HashMap;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Debug)]
-pub enum RuntimeVal {
-    Float(f64),
-    String(String),
-    Bool(bool),
-    Range(i64, i64),
-    Void,
-    Pipe(Sender<f64>, Arc<Mutex<Receiver<f64>>>),
-    Struct(String, HashMap<String, RuntimeVal>),
-    List(Vec<RuntimeVal>),
-    Map(HashMap<String, RuntimeVal>),
-}
-
-// Manual implementation to handle Pipe which cannot be compared
-impl PartialEq for RuntimeVal {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (RuntimeVal::Float(a), RuntimeVal::Float(b)) => a == b,
-            (RuntimeVal::String(a), RuntimeVal::String(b)) => a == b,
-            (RuntimeVal::Bool(a), RuntimeVal::Bool(b)) => a == b,
-            (RuntimeVal::Range(s1, e1), RuntimeVal::Range(s2, e2)) => s1 == s2 && e1 == e2,
-            (RuntimeVal::Void, RuntimeVal::Void) => true,
-            // Pipes are never equal (identity check is hard without ID)
-            (RuntimeVal::Pipe(_, _), RuntimeVal::Pipe(_, _)) => false,
-            // Structs equality
-            (RuntimeVal::Struct(n1, d1), RuntimeVal::Struct(n2, d2)) => n1 == n2 && d1 == d2,
-            // Collections equality
-            (RuntimeVal::List(l1), RuntimeVal::List(l2)) => l1 == l2,
-            (RuntimeVal::Map(m1), RuntimeVal::Map(m2)) => m1 == m2,
-            _ => false,
-        }
-    }
-}
-
-impl PartialOrd for RuntimeVal {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (RuntimeVal::Float(a), RuntimeVal::Float(b)) => a.partial_cmp(b),
-            (RuntimeVal::String(a), RuntimeVal::String(b)) => a.partial_cmp(b),
-            // Other types: define an arbitrary order or return None
-            _ => None,
-        }
-    }
-}
-impl RuntimeVal {
-    pub fn as_float(&self) -> Result<f64, String> {
-        match self {
-            RuntimeVal::Float(f) => Ok(*f),
-            _ => Err("Type Error: Expected a number".to_string()),
-        }
-    }
-}
-
-impl std::fmt::Display for RuntimeVal {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            RuntimeVal::Float(n) => write!(f, "{}", n),
-            RuntimeVal::String(s) => write!(f, "{}", s),
-            RuntimeVal::Bool(b) => write!(f, "{}", b),
-            RuntimeVal::Range(s, e) => write!(f, "{}..{}", s, e),
-            RuntimeVal::Void => write!(f, "void"),
-            RuntimeVal::Pipe(_, _) => write!(f, "<Pipe>"),
-            RuntimeVal::Struct(name, _) => write!(f, "<Struct {}>", name),
-            RuntimeVal::List(l) => write!(f, "<List len={}>", l.len()),
-            RuntimeVal::Map(m) => write!(f, "<Map len={}>", m.len()),
-        }
-    }
-}
-#[derive(Clone, Debug)]
-struct Value {
-    data: RuntimeVal,
-    is_mutable: bool,
-}
-pub struct Interpreter {
-    env: HashMap<String, Value>,
-    functions: HashMap<String, Statement>,
-}
 impl Interpreter {
-    pub fn new() -> Self {
-        Self {
-            env: HashMap::new(),
-            functions: HashMap::new(),
-        }
-    }
-    pub fn run(&mut self, program: grammar::Program) -> Result<(), String> {
-        for statement in program.statements {
-            self.execute_statement(statement)?;
-        }
-        Ok(())
-    }
-    fn execute_statement(&mut self, statement: Statement) -> Result<RuntimeVal, String> {
-        match statement {
-            // Struct definitions are just Declarations, no runtime effect in interpreter
-            Statement::StructDef { .. } => Ok(RuntimeVal::Void),
-            Statement::Assignment {
-                var_kw,
-                ident,
-                value,
-                ..
-            } => {
-                let val = self.eval_expr(value)?;
-                let user_wrote_var = var_kw.is_some();
-                let existing_info = self.env.get(&ident).map(|v| v.is_mutable);
-                match existing_info {
-                    // CASE A: The Variable Already Exists
-                    Some(is_mutable) => {
-                        if user_wrote_var {
-                            return Err(format!(
-                                "ERROR: '{}' already exists. Don't use 'var' again.",
-                                ident
-                            ));
-                        }
-                        if !is_mutable {
-                            return Err(format!(
-                                "ERROR: '{}' is immutable (read-only). You cannot change it.",
-                                ident
-                            ));
-                        }
-                        // It's mutable, so we update it!
-                        self.env.insert(
-                            ident.clone(),
-                            Value {
-                                data: val.clone(),
-                                is_mutable: true,
-                            },
-                        );
-                        // println!("🔄 Reassigned Mutable: {} = {}", ident, val);
-                    }
-
-                    // CASE B: The Variable is New (Your Fix is Here)
-                    None => {
-                        // If 'var' is present -> Mutable.
-                        // If 'var' is MISSING -> Immutable (The Sane Default).
-                        self.env.insert(
-                            ident.clone(),
-                            Value {
-                                data: val.clone(),
-                                is_mutable: user_wrote_var,
-                            },
-                        );
-
-                        /*
-                        let type_log = if user_wrote_var {
-                            "Mutable"
-                        } else {
-                            "Immutable"
-                        };
-                        println!("✨ Defined New {}: {} = {}", type_log, ident, val);
-                        */
-                    }
-                }
-                Ok(RuntimeVal::Void)
-            }
-            Statement::On {
-                condition,
-                body,
-                else_clause,
-                ..
-            } => {
-                // 1. Evaluate the condition (returns 1 for True, 0 for False)
-                let result = self.eval_expr(condition)?.as_float()?;
-
-                if result != 0.0 {
-                    // True: Run the main block
-                    self.execute_block(body)?;
-                } else {
-                    // False: Run the 'off' block (if it exists)
-                    if let Some(clause) = else_clause {
-                        self.execute_block(clause.body)?;
-                    }
-                }
-                Ok(RuntimeVal::Void)
-            }
-            Statement::LoopOn {
-                condition, body, ..
-            } => {
-                // While condition evaluates to True (1)
-                while self.eval_expr(condition.clone())?.as_float()? != 0.0 {
-                    self.execute_block(body.clone())?;
-                }
-                Ok(RuntimeVal::Void)
-            }
-            // ⭐ NEW: For Loop (loop x in 0..10 per 2 ...)
-            Statement::LoopIter {
-                iterator,
-                iterable,
-                step,
-                filter,
-                body,
-                else_clause,
-                ..
-            } => {
-                let iterable_val = self.eval_expr(iterable)?;
-
-                // Vector of items to iterate over
-                let items: Vec<RuntimeVal> = match iterable_val {
-                    RuntimeVal::Range(start, end) => {
-                        // Determine Step (Default 1)
-                        let step_val = if let Some(s) = step {
-                            self.eval_expr(s.value)?.as_float()? as i64
-                        } else {
-                            1
-                        };
-                        let mut vec = Vec::new();
-                        let mut current = start;
-                        while current < end {
-                            vec.push(RuntimeVal::Float(current as f64));
-                            current += step_val;
-                        }
-                        vec
-                    }
-                    RuntimeVal::List(list) => list,
-                    RuntimeVal::String(s) => {
-                        // Iterate over characters as strings
-                        s.chars()
-                            .map(|c| RuntimeVal::String(c.to_string()))
-                            .collect()
-                    }
-                    _ => {
-                        return Err(
-                            "Loop Error: Can only loop over ranges, lists, or strings".to_string()
-                        );
-                    }
-                };
-
-                for item in items {
-                    // 1. SAVE the current environment (Parent Scope)
-                    let parent_env = self.env.clone();
-
-                    // 2. Define iterator in the CURRENT scope
-                    self.env.insert(
-                        iterator.clone(),
-                        Value {
-                            data: item, // loop variable is mutable copy
-                            is_mutable: false,
-                        },
-                    );
-
-                    // 3. Handle Filter
-                    let run_main = if let Some(f) = &filter {
-                        // Check condition
-                        self.eval_expr(f.condition.clone())?.as_float()? != 0.0
-                    } else {
-                        true
-                    };
-
-                    // 4. Run Body
-                    if run_main {
-                        self.execute_block(body.clone())?;
-                    } else if let Some(off) = &else_clause {
-                        self.execute_block(off.body.clone())?;
-                    }
-
-                    // 5. RESTORE Parent Env
-                    self.env = parent_env;
-                }
-                Ok(RuntimeVal::Void)
-            }
-            Statement::Print(_, expr) => {
-                let val = self.eval_expr(expr)?;
-                println!("{}", val);
-                Ok(RuntimeVal::Void)
-            }
-            Statement::ExprStmt(expr) => self.eval_expr(expr),
-            stmt @ Statement::FunctionDef { .. } => {
-                if let Statement::FunctionDef { name, .. } = &stmt {
-                    let func_name = name.clone();
-                    self.functions.insert(func_name.clone(), stmt);
-                    println!("✨ Registered Function: {}", func_name);
-                }
-                Ok(RuntimeVal::Void)
-            }
-            // 1. Give (Sync Send)
-            Statement::Give(_, channel_expr, value_expr) => {
-                let chan = self.eval_expr(channel_expr)?;
-                let val = self.eval_expr(value_expr)?.as_float()?;
-
-                if let RuntimeVal::Pipe(tx, _) = chan {
-                    // Send value. unwrap() panics if channel closed/broken.
-                    tx.send(val)
-                        .map_err(|_| "Pipe Error: Receiver closed".to_string())?;
-                } else {
-                    return Err("Runtime Error: 'give' expects a pipe.".to_string());
-                }
-                Ok(RuntimeVal::Void)
-            }
-
-            // 2. Close (Drop Sender)
-            Statement::Close(_, _channel_expr) => {
-                // In MPSC, closing happens when Sender is dropped.
-                // Since our 'env' holds clones of Sender, explicit close is tricky in interpreter.
-                // We'll just do nothing in the interpreter test bench.
-                // The Compiler is the source of truth for async behavior.
-                println!("⚠️ [Interpreter] 'close' is a no-op in test mode.");
-                Ok(RuntimeVal::Void)
-            }
-        }
-    }
-    fn execute_block(&mut self, block: grammar::Block) -> Result<RuntimeVal, String> {
-        let mut last_val = RuntimeVal::Void;
-
-        for stmt in block.statements {
-            // Capture the result of every statement
-            last_val = self.execute_statement(stmt)?;
-        }
-        Ok(last_val) // Return the result of the last statement
-    }
-    fn eval_expr(&mut self, expr: Expression) -> Result<RuntimeVal, String> {
+    pub fn eval_expr(&mut self, expr: Expression) -> Result<RuntimeVal, String> {
         match expr {
             Expression::StructInit(name, _, fields, _) => {
                 // 1. Evaluate all fields
                 let mut data = HashMap::new();
                 for f in fields {
                     let val = self.eval_expr(f.value)?;
-                    data.insert(f.name.value, val); // FIXED: Unwrap f.name.value
+                    data.insert(f.name.value, val);
                 }
                 // 2. Return Struct Value
-                Ok(RuntimeVal::Struct(name.value, data)) // FIXED: Unwrap name.value
+                Ok(RuntimeVal::Struct(name.value, data))
             }
 
             Expression::FieldAccess(target, _, field) => {
@@ -330,7 +26,7 @@ impl Interpreter {
                 // Check if it's a struct directly OR a pointer to a struct
                 match val {
                     RuntimeVal::Struct(_, fields) => fields
-                        .get(&field.value) // FIXED: Unwrap field.value
+                        .get(&field.value)
                         .cloned()
                         .ok_or_else(|| format!("Field '{}' not found", field.value)),
                     // Handle Pointer to Struct (Auto-Deref) could go here
@@ -341,7 +37,6 @@ impl Interpreter {
                 }
             }
 
-            // FIXED: Unwrap VariableVal
             Expression::Variable(v) => {
                 self.env
                     .get(&v.value) // Use .value here
@@ -349,7 +44,6 @@ impl Interpreter {
                     .ok_or_else(|| format!("ERROR: Variable '{}' not found.", v.value))
             }
 
-            // FIXED: Unwrap NumberVal
             Expression::Number(num_val) => {
                 let n: f64 = num_val.value.parse().map_err(|_| "Invalid number")?;
                 Ok(RuntimeVal::Float(n))
@@ -594,7 +288,7 @@ impl Interpreter {
                     for (i, param) in params.into_iter().enumerate() {
                         fn_env.insert(
                             param.name,
-                            Value {
+                            super::values::Value {
                                 data: arg_values[i].clone(),
                                 is_mutable: true, // Args are local variables, so they are mutable
                             },
@@ -605,14 +299,20 @@ impl Interpreter {
                     self.env = fn_env;
 
                     // H. Run the Body
-                    let result = self.execute_block(body);
+                    let result_sig = self.execute_block(body)?;
 
                     // I. Restore the Old World
                     self.env = old_env;
 
                     // Return the result of the function
-                    // Return the result of the function
-                    result
+                    match result_sig {
+                        super::StmtResult::Normal(v) => Ok(v),
+                        super::StmtResult::Return(v) => Ok(v),
+                        super::StmtResult::Break | super::StmtResult::Continue => {
+                            Err("Error: 'break' or 'continue' leaked from function body."
+                                .to_string())
+                        }
+                    }
                 } else {
                     Err(format!("'{}' is not a function.", func_name))
                 }

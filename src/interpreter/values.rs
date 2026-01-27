@@ -1,0 +1,80 @@
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Debug)]
+pub enum RuntimeVal {
+    Float(f64),
+    String(String),
+    Bool(bool),
+    Range(i64, i64),
+    Void,
+    Pipe(Sender<f64>, Arc<Mutex<Receiver<f64>>>),
+    Struct(String, HashMap<String, RuntimeVal>),
+    List(Vec<RuntimeVal>),
+    Map(HashMap<String, RuntimeVal>),
+}
+
+// Manual implementation to handle Pipe which cannot be compared
+impl PartialEq for RuntimeVal {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (RuntimeVal::Float(a), RuntimeVal::Float(b)) => a == b,
+            (RuntimeVal::String(a), RuntimeVal::String(b)) => a == b,
+            (RuntimeVal::Bool(a), RuntimeVal::Bool(b)) => a == b,
+            (RuntimeVal::Range(s1, e1), RuntimeVal::Range(s2, e2)) => s1 == s2 && e1 == e2,
+            (RuntimeVal::Void, RuntimeVal::Void) => true,
+            // Pipes are never equal (identity check is hard without ID)
+            (RuntimeVal::Pipe(_, _), RuntimeVal::Pipe(_, _)) => false,
+            // Structs equality
+            (RuntimeVal::Struct(n1, d1), RuntimeVal::Struct(n2, d2)) => n1 == n2 && d1 == d2,
+            // Collections equality
+            (RuntimeVal::List(l1), RuntimeVal::List(l2)) => l1 == l2,
+            (RuntimeVal::Map(m1), RuntimeVal::Map(m2)) => m1 == m2,
+            _ => false,
+        }
+    }
+}
+
+impl PartialOrd for RuntimeVal {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (RuntimeVal::Float(a), RuntimeVal::Float(b)) => a.partial_cmp(b),
+            (RuntimeVal::String(a), RuntimeVal::String(b)) => a.partial_cmp(b),
+            // Other types: define an arbitrary order or return None
+            _ => None,
+        }
+    }
+}
+
+impl RuntimeVal {
+    pub fn as_float(&self) -> Result<f64, String> {
+        match self {
+            RuntimeVal::Float(f) => Ok(*f),
+            _ => Err("Type Error: Expected a number".to_string()),
+        }
+    }
+}
+
+impl fmt::Display for RuntimeVal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            RuntimeVal::Float(n) => write!(f, "{}", n),
+            RuntimeVal::String(s) => write!(f, "{}", s),
+            RuntimeVal::Bool(b) => write!(f, "{}", b),
+            RuntimeVal::Range(s, e) => write!(f, "{}..{}", s, e),
+            RuntimeVal::Void => write!(f, "void"),
+            RuntimeVal::Pipe(_, _) => write!(f, "<Pipe>"),
+            RuntimeVal::Struct(name, _) => write!(f, "<Struct {}>", name),
+            RuntimeVal::List(l) => write!(f, "<List len={}>", l.len()),
+            RuntimeVal::Map(m) => write!(f, "<Map len={}>", m.len()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Value {
+    pub data: RuntimeVal,
+    pub is_mutable: bool,
+}

@@ -1,21 +1,23 @@
-print "--- TEST: String Concat ---"
-print "Hello " + "World"
-
-print "--- TEST: Len ---"
-print len "abc"
-var l = list num { 10, 20, 30 }
-print len l
-
-print "--- TEST: Equality ---"
-var m = list num { 10, 20, 30 }
-print l == m // Expected: 1 (true)
-var k = list num { 99 }
-print l == k // Expected: 0 (false)
-print "hello" == "hello" // Expected: 1
-print "hello" == "world" // Expected: 0
-
-print "--- TEST: Loop List ---"
-var l = list num { 10, 20 }
-loop x in l {
-    print x
+fn test_ret() {
+    print "Start Function"
+    return 1
+    print "Unreachable"
 }
+
+print "--- Testing Return ---"
+print test_ret()
+
+print "--- Testing Loop ---"
+var i = 0
+loop i in 0..6 {
+    on (i == 2) {
+        print "Skipping 2"
+        continue
+    }
+    on (i == 4) {
+        print "Breaking at 4"
+        break
+    }
+    print i
+}
+print "Done"
