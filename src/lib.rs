@@ -40,6 +40,7 @@ pub mod grammar {
         Bool, // New
         #[rust_sitter::leaf(text = "adr")]
         Adr,
+        #[rust_sitter::leaf(text = "pipe")] Pipe,
     }
     #[derive(Debug, Clone)]
     pub struct FuncParam {
@@ -125,6 +126,18 @@ pub mod grammar {
 
             body: Block,
         },
+        // 1. Give: give <channel> <value>
+        Give(
+            #[rust_sitter::leaf(text = "give")] (),
+            Expression, // Channel
+            Expression, // Value
+        ),
+
+        // 2. Close: close <channel>
+        Close(
+            #[rust_sitter::leaf(text = "close")] (),
+            Expression, // Channel
+        ),
         ExprStmt(Expression),
         Print(#[rust_sitter::leaf(text = "print")] (), Expression),
     }
@@ -143,6 +156,19 @@ pub mod grammar {
         #[rust_sitter::prec_left(1)]
         Variable(VariableVal),
 
+        #[rust_sitter::prec_left(1)]
+        PipeInit(
+            #[rust_sitter::leaf(text = "pipe")] (),
+            KiroType, // The type of data in the pipe
+        ),
+
+        // 4. Take: take <channel>
+        // Example: var x = take p
+        #[rust_sitter::prec_right(4)]
+        Take(
+            #[rust_sitter::leaf(text = "take")] (),
+            Box<Expression>,
+        ),
         // 3. Pointer Logic
         // ref x
         #[rust_sitter::prec_right(4)] // Right-associative

@@ -13,6 +13,20 @@ impl Compiler {
     pub fn compile(&mut self, program: grammar::Program) -> String {
         let mut output = String::new();
         output.push_str("#![allow(unused_mut, unused_variables, unused_parens)]\n");
+        // 1. Import async_channel
+        output.push_str("use async_channel;\n");
+
+        // 2. Define the Pipe Wrapper
+        // We use a struct so we can pass a single 'p' variable that holds both ends.
+        output.push_str(
+            r#"
+            #[derive(Clone)]
+            struct KiroPipe<T> {
+                tx: async_channel::Sender<T>,
+                rx: async_channel::Receiver<T>,
+            }
+        "#,
+        );
         output.push_str("#[tokio::main]\nasync fn main(){\n");
         for statement in program.statements {
             let line = self.compile_statement(statement);
@@ -30,6 +44,7 @@ impl Compiler {
             // Since our 'Adr' type in grammar is generic-less, we assume generic runtime value
             // or we might need to cast. For now, let's map it to a dynamic pointer.
             grammar::KiroType::Adr => "std::sync::Arc<std::sync::Mutex<f64>>".to_string(), // Simplified for v1
+            grammar::KiroType::Pipe => "KiroPipe<f64>".to_string(),
         }
     }
     fn compile_statement(&mut self, statement: Statement) -> String {
@@ -126,14 +141,13 @@ impl Compiler {
                 // but in Rust loops, the iterator is declared implicitly.
                 self.known_vars.insert(iterator.clone());
 
-                format!("for {} in {} {}", iterator, range_str, inner_logic)
+                format!(
+                    "for {}_i64 in {} {{ let {} = {}_i64 as f64; {} }}",
+                    iterator, range_str, iterator, iterator, inner_logic
+                )
             }
             Statement::FunctionDef {
-                pure_kw,
-                name,
-                params,
-                body,
-                ..
+                name, params, body, ..
             } => {
                 // In Kiro, functions are async by default (for 'run')
                 // We ignore 'pure' in transpilation (it's a safety check, not a syntax change)
@@ -147,18 +161,25 @@ impl Compiler {
 
                 // We force return type to i64 for now (since we only have numbers)
                 // In the future, this will be 'RuntimeVal' or inferred.
-                format!(
-                    "async fn {}({}) -> i64 {}",
-                    name,
-                    param_strs.join(", "),
-                    body_str
-                )
+                format!("async fn {}({}) {}", name, param_strs.join(", "), body_str)
             }
 
             // 2. Expression Statement (Standard Call on its own line)
             Statement::ExprStmt(expr) => {
                 let val = self.compile_expr(expr);
                 format!("{};", val)
+            }
+            Statement::Give(_, channel, value) => {
+                let ch = self.compile_expr(channel);
+                let val = self.compile_expr(value);
+                // We use unwrap() because if the receiver is closed, panic is appropriate for now
+                format!("{}.tx.send({}).await.unwrap();", ch, val)
+            }
+
+            // 4. Close -> .tx.close()
+            Statement::Close(_, channel) => {
+                let ch = self.compile_expr(channel);
+                format!("{}.tx.close();", ch)
             }
         }
     }
@@ -183,7 +204,16 @@ impl Compiler {
                 grammar::BoolVal::True(_) => "true".to_string(),
                 grammar::BoolVal::False(_) => "false".to_string(),
             },
+            Expression::PipeInit(_, _type) => {
+                // Ignore type for now, assume f64 (or use it if we implemented generics)
+                "{ let (tx, rx) = async_channel::unbounded(); KiroPipe { tx, rx } }".to_string()
+            }
 
+            // 6. Take -> .rx.recv().await
+            Expression::Take(_, channel) => {
+                let ch = self.compile_expr(*channel);
+                format!("{}.rx.recv().await.unwrap()", ch)
+            }
             // New Pointer Logic
             Expression::Ref(_, target) => {
                 // ref x  ->  Arc::new(Mutex::new(x))
@@ -248,7 +278,7 @@ impl Compiler {
             ),
             Expression::Range(start, _, end) => {
                 format!(
-                    "({}..{})",
+                    "(({} as i64)..({} as i64))",
                     self.compile_expr(*start),
                     self.compile_expr(*end)
                 )
@@ -256,8 +286,10 @@ impl Compiler {
             // 3. Normal Call -> await
             Expression::Call(func, _, args, _) => {
                 let func_name = self.compile_expr(*func);
-                let arg_strs: Vec<String> =
-                    args.iter().map(|a| self.compile_expr(a.clone())).collect();
+                let arg_strs: Vec<String> = args
+                    .iter()
+                    .map(|a| format!("({}).clone()", self.compile_expr(a.clone())))
+                    .collect();
 
                 format!("{}({}).await", func_name, arg_strs.join(", "))
             }
@@ -270,8 +302,10 @@ impl Compiler {
 
                 if let Expression::Call(func, _, args, _) = *call_expr {
                     let func_name = self.compile_expr(*func);
-                    let arg_strs: Vec<String> =
-                        args.iter().map(|a| self.compile_expr(a.clone())).collect();
+                    let arg_strs: Vec<String> = args
+                        .iter()
+                        .map(|a| format!("({}).clone()", self.compile_expr(a.clone())))
+                        .collect();
 
                     // Spawn logic:
                     format!("tokio::spawn({}({}))", func_name, arg_strs.join(", "))

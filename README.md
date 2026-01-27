@@ -57,6 +57,7 @@ Kiro uses a "sane default" approach to mutability.
 - `str`: Strings (e.g., `"Hello"`).
 - `bool`: Booleans (`true`, `false`).
 - `adr`: Addresses/Pointers.
+- `pipe`: Channels for asynchronous communication.
 
 ### 2. Control Flow
 
@@ -119,7 +120,7 @@ add(10, 20)
 
 ### 4. Pointers & Memory (`ref` / `deref`)
 
-Kiro abstracts away complex memory management while giving you pointer-like behavior. references are thread-safe by default (compiling to `Arc<Mutex<T>>`).
+Kiro abstracts away complex memory management while giving you pointer-like behavior. References are thread-safe by default (compiling to `Arc<Mutex<T>>`).
 
 ```kiro
 var value = 100
@@ -127,7 +128,11 @@ var ptr = ref value    // Create a reference
 print deref ptr        // Read value (100)
 ```
 
-### 5. Concurrency (`run`)
+### 5. Concurrency & Pipes
+
+Kiro makes concurrency easy with the `run` keyword and **Pipes** (channels) for communication.
+
+#### Async Execution
 
 Spawning a background thread (async task) is as simple as using `run`.
 
@@ -136,8 +141,38 @@ fn worker(id: num) {
     print "Worker started"
 }
 
-run worker(1) // Runs immediately in background
+run worker(1) // Runs immediately in the background
 print "Main thread continues"
+```
+
+#### Pipes (Channels)
+
+Pipes allow safe communication between threads. They compile to Rust's Multi-Producer Single-Consumer (MPSC) channels (or `async-channel`).
+
+1.  **Create a Pipe**: `var p = pipe num`
+2.  **Send Data (`give`)**: `give p 42`
+3.  **Receive Data (`take`)**: `var val = take p`
+4.  **Close Pipe**: `close p`
+
+**Example:**
+
+```kiro
+// 1. Create a pipe for numbers
+var p = pipe num
+
+fn sender(ch: pipe) {
+    print "Sending..."
+    give ch 100
+    give ch 200
+    close ch
+}
+
+// 2. Start sender in background
+run sender(p)
+
+// 3. Receive in main thread
+print take p  // Prints 100
+print take p  // Prints 200
 ```
 
 ---

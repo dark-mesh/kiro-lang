@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 pub struct BuildManager {
-    build_dir: String
+    build_dir: String,
 }
 impl BuildManager {
     pub fn new(build_dir: &str) -> Self {
@@ -20,10 +20,10 @@ impl BuildManager {
         if !Path::new(&src_dir).exists() {
             fs::create_dir_all(&src_dir).map_err(|e| e.to_string())?;
             println!("📁 Initialized build directory: {}", self.build_dir);
-            
-            // 2. Generate Cargo.toml
-            self.create_cargo_toml()?;
         }
+
+        // 2. Generate/Update Cargo.toml
+        self.create_cargo_toml()?;
         Ok(())
     }
     pub fn save_code(&self, code: String) -> Result<(), String> {
@@ -34,7 +34,7 @@ impl BuildManager {
     }
     pub fn run(&self) -> Result<(), String> {
         println!("🚀 Compiling and Running...\n");
-        
+
         let status = Command::new("cargo")
             .arg("run")
             .arg("--quiet") // Less noise
@@ -48,25 +48,30 @@ impl BuildManager {
             Err("Runtime execution failed.".to_string())
         }
     }
-    fn create_cargo_toml(&self) -> Result<(), String>{
-        let my_cargo = fs::read_to_string("Cargo.toml")
-            .unwrap_or_else(|_| "".to_string());
+    fn create_cargo_toml(&self) -> Result<(), String> {
+        let my_cargo = fs::read_to_string("Cargo.toml").unwrap_or_else(|_| "".to_string());
 
         // Simple parser: find the line starting with 'tokio ='
         let tokio_dep = my_cargo.lines()
             .find(|line| line.trim().starts_with("tokio ="))
             .unwrap_or(r#"tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }"#); // Fallback if file missing
-
-        let content = format!(r#"
+        let async_channel_dep = my_cargo
+            .lines()
+            .find(|line| line.trim().starts_with("async-channel ="))
+            .unwrap_or(r#"async-channel = "2.5""#);
+        let content = format!(
+            r#"
             [package]
             name = "kiro_script"
             version = "0.1.0"
             edition = "2021"
 
             [dependencies]
+            {}
             {} 
-            "#, tokio_dep);
-        fs::write(format!("{}/Cargo.toml", self.build_dir), content)
-            .map_err(|e| e.to_string())
+            "#,
+            tokio_dep, async_channel_dep
+        );
+        fs::write(format!("{}/Cargo.toml", self.build_dir), content).map_err(|e| e.to_string())
     }
 }

@@ -1,13 +1,43 @@
 use crate::grammar::{self, Expression, Statement};
 use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug)]
 pub enum RuntimeVal {
     Float(f64),
     String(String),
     Bool(bool),
     Range(i64, i64),
     Void,
+    Pipe(Sender<f64>, Arc<Mutex<Receiver<f64>>>),
+}
+
+// Manual implementation to handle Pipe which cannot be compared
+impl PartialEq for RuntimeVal {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (RuntimeVal::Float(a), RuntimeVal::Float(b)) => a == b,
+            (RuntimeVal::String(a), RuntimeVal::String(b)) => a == b,
+            (RuntimeVal::Bool(a), RuntimeVal::Bool(b)) => a == b,
+            (RuntimeVal::Range(s1, e1), RuntimeVal::Range(s2, e2)) => s1 == s2 && e1 == e2,
+            (RuntimeVal::Void, RuntimeVal::Void) => true,
+            // Pipes are never equal (identity check is hard without ID)
+            (RuntimeVal::Pipe(_, _), RuntimeVal::Pipe(_, _)) => false,
+            _ => false,
+        }
+    }
+}
+
+impl PartialOrd for RuntimeVal {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (RuntimeVal::Float(a), RuntimeVal::Float(b)) => a.partial_cmp(b),
+            (RuntimeVal::String(a), RuntimeVal::String(b)) => a.partial_cmp(b),
+            // Other types: define an arbitrary order or return None
+            _ => None,
+        }
+    }
 }
 impl RuntimeVal {
     pub fn as_float(&self) -> Result<f64, String> {
@@ -26,6 +56,7 @@ impl std::fmt::Display for RuntimeVal {
             RuntimeVal::Bool(b) => write!(f, "{}", b),
             RuntimeVal::Range(s, e) => write!(f, "{}..{}", s, e),
             RuntimeVal::Void => write!(f, "void"),
+            RuntimeVal::Pipe(_, _) => write!(f, "<Pipe>"),
         }
     }
 }
@@ -86,7 +117,7 @@ impl Interpreter {
                                 is_mutable: true,
                             },
                         );
-                        println!("🔄 Reassigned Mutable: {} = {}", ident, val);
+                        // println!("🔄 Reassigned Mutable: {} = {}", ident, val);
                     }
 
                     // CASE B: The Variable is New (Your Fix is Here)
@@ -101,12 +132,14 @@ impl Interpreter {
                             },
                         );
 
+                        /*
                         let type_log = if user_wrote_var {
                             "Mutable"
                         } else {
                             "Immutable"
                         };
                         println!("✨ Defined New {}: {} = {}", type_log, ident, val);
+                        */
                     }
                 }
                 Ok(RuntimeVal::Void)
@@ -171,28 +204,34 @@ impl Interpreter {
                 // 3. The Loop Mechanism
                 let mut current = start;
                 while current < end {
-                    // A. Update the iterator variable (x) in memory
+                    // 1. SAVE the current environment (Parent Scope)
+                    let parent_env = self.env.clone();
+
+                    // 2. Define iterator in the CURRENT scope (so the body can see it)
                     self.env.insert(
                         iterator.clone(),
                         Value {
                             data: RuntimeVal::Float(current as f64),
-                            is_mutable: false, // Iterators are usually read-only
+                            is_mutable: false,
                         },
                     );
 
-                    // B. Handle Filter (on/off logic)
-                    let run_main_body = if let Some(f) = &filter {
-                        // Check condition: on (x % 2 == 0)
+                    // 3. Handle Filter
+                    let run_main = if let Some(f) = &filter {
                         self.eval_expr(f.condition.clone())?.as_float()? != 0.0
                     } else {
-                        true // No filter? Always run.
+                        true
                     };
 
-                    if run_main_body {
+                    // 4. Run Body (Variables defined here will die when we restore env)
+                    if run_main {
                         self.execute_block(body.clone())?;
                     } else if let Some(off) = &else_clause {
                         self.execute_block(off.body.clone())?;
                     }
+
+                    // 5. RESTORE the Parent Environment (Wipe loop variables)
+                    self.env = parent_env;
 
                     // C. Increment
                     current += step_val;
@@ -211,6 +250,30 @@ impl Interpreter {
                     self.functions.insert(func_name.clone(), stmt);
                     println!("✨ Registered Function: {}", func_name);
                 }
+                Ok(RuntimeVal::Void)
+            }
+            // 1. Give (Sync Send)
+            Statement::Give(_, channel_expr, value_expr) => {
+                let chan = self.eval_expr(channel_expr)?;
+                let val = self.eval_expr(value_expr)?.as_float()?;
+
+                if let RuntimeVal::Pipe(tx, _) = chan {
+                    // Send value. unwrap() panics if channel closed/broken.
+                    tx.send(val)
+                        .map_err(|_| "Pipe Error: Receiver closed".to_string())?;
+                } else {
+                    return Err("Runtime Error: 'give' expects a pipe.".to_string());
+                }
+                Ok(RuntimeVal::Void)
+            }
+
+            // 2. Close (Drop Sender)
+            Statement::Close(_, _channel_expr) => {
+                // In MPSC, closing happens when Sender is dropped.
+                // Since our 'env' holds clones of Sender, explicit close is tricky in interpreter.
+                // We'll just do nothing in the interpreter test bench.
+                // The Compiler is the source of truth for async behavior.
+                println!("⚠️ [Interpreter] 'close' is a no-op in test mode.");
                 Ok(RuntimeVal::Void)
             }
         }
@@ -246,7 +309,26 @@ impl Interpreter {
                 grammar::BoolVal::True(_) => Ok(RuntimeVal::Bool(true)),
                 grammar::BoolVal::False(_) => Ok(RuntimeVal::Bool(false)),
             },
+            // 3. Pipe Init
+            Expression::PipeInit(_, _) => {
+                let (tx, rx) = mpsc::channel();
+                Ok(RuntimeVal::Pipe(tx, Arc::new(Mutex::new(rx))))
+            }
 
+            // 4. Take (Sync Receive)
+            Expression::Take(_, channel_expr) => {
+                let chan = self.eval_expr(*channel_expr)?;
+
+                if let RuntimeVal::Pipe(_, rx_mutex) = chan {
+                    let rx = rx_mutex.lock().unwrap();
+                    let val = rx
+                        .recv()
+                        .map_err(|_| "Pipe Error: Channel empty or closed".to_string())?;
+                    Ok(RuntimeVal::Float(val))
+                } else {
+                    Err("Runtime Error: 'take' expects a pipe.".to_string())
+                }
+            }
             // Pointer Logic (Interpreter Stub)
             // Implementing true shared memory in a tree-walker is hard.
             // For now, we just pass the value through (Copy semantics) to fix the build.
