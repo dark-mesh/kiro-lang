@@ -26,8 +26,9 @@ impl BuildManager {
         self.create_cargo_toml()?;
         Ok(())
     }
-    pub fn save_code(&self, code: String) -> Result<(), String> {
-        let file_path = format!("{}/src/main.rs", self.build_dir);
+
+    pub fn save_file(&self, name_without_ext: &str, code: String) -> Result<(), String> {
+        let file_path = format!("{}/src/{}.rs", self.build_dir, name_without_ext);
         fs::write(&file_path, code).map_err(|e| e.to_string())?;
         println!("💾 Code saved to {}", file_path);
         Ok(())

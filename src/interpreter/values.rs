@@ -14,6 +14,11 @@ pub enum RuntimeVal {
     Struct(String, HashMap<String, RuntimeVal>),
     List(Vec<RuntimeVal>),
     Map(HashMap<String, RuntimeVal>),
+    // Data Exports, Function ASTs
+    Module(
+        HashMap<String, RuntimeVal>,
+        HashMap<String, crate::grammar::grammar::Statement>,
+    ),
 }
 
 // Manual implementation to handle Pipe which cannot be compared
@@ -32,6 +37,7 @@ impl PartialEq for RuntimeVal {
             // Collections equality
             (RuntimeVal::List(l1), RuntimeVal::List(l2)) => l1 == l2,
             (RuntimeVal::Map(m1), RuntimeVal::Map(m2)) => m1 == m2,
+            (RuntimeVal::Module(_m1, _f1), RuntimeVal::Module(_m2, _f2)) => false, // Modules identity is tough, assume false for now
             _ => false,
         }
     }
@@ -69,6 +75,7 @@ impl fmt::Display for RuntimeVal {
             RuntimeVal::Struct(name, _) => write!(f, "<Struct {}>", name),
             RuntimeVal::List(l) => write!(f, "<List len={}>", l.len()),
             RuntimeVal::Map(m) => write!(f, "<Map len={}>", m.len()),
+            RuntimeVal::Module(_, _) => write!(f, "<Module>"),
         }
     }
 }

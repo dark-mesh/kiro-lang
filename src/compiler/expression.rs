@@ -22,6 +22,14 @@ impl Compiler {
             // If it's a raw struct: user.name works.
             // If it's a reference:            // 3. Compile Field Access
             Expression::FieldAccess(target, _, field) => {
+                // Check if the target is a known module (e.g., "math")
+                if let Expression::Variable(v) = &*target {
+                    if self.imported_modules.contains(&v.value) {
+                        // It is a module! Use Rust's '::' syntax
+                        return format!("{}::{}", v.value, field.value);
+                    }
+                }
+
                 // Use helper trait for Auto-Deref
                 format!(
                     "{}.kiro_get(|v| v.{}.clone())",

@@ -29,10 +29,18 @@ impl Interpreter {
                         .get(&field.value)
                         .cloned()
                         .ok_or_else(|| format!("Field '{}' not found", field.value)),
+
+                    // NEW: Handle Module Access
+                    // NEW: Handle Module Access
+                    RuntimeVal::Module(exports, _) => exports
+                        .get(&field.value)
+                        .cloned()
+                        .ok_or_else(|| format!("Export '{}' not found in module", field.value)),
+
                     // Handle Pointer to Struct (Auto-Deref) could go here
                     _ => Err(format!(
-                        "Cannot access field '{}' on this type",
-                        field.value
+                        "Cannot access field '{}' on this type {:?}",
+                        field.value, val
                     )),
                 }
             }
@@ -235,19 +243,31 @@ impl Interpreter {
             }
             // 1. Handle Standard Calls
             Expression::Call(func_var, _, args, _) => {
-                // A. Resolve the function name
-                let func_name = match *func_var {
-                    Expression::Variable(v) => v.value,
-                    _ => return Err("Expected function name".to_string()),
+                // A. Resolve the function
+                // It could be a simple Variable (global function)
+                // OR a FieldAccess (module function)
+
+                // We'll extract the FunctionDef statement
+                let (func_stmt, func_debug_name) = match *func_var {
+                    Expression::Variable(v) => {
+                        let f = self.functions.get(&v.value).cloned();
+                        (f, v.value)
+                    }
+                    Expression::FieldAccess(target, _, field) => {
+                        // Evaluate target to find the Module
+                        let val = self.eval_expr(*target)?;
+                        if let RuntimeVal::Module(_, funcs) = &val {
+                            let f = funcs.get(&field.value).cloned();
+                            (f, format!("{}.{}", val, field.value)) // Note: val display might be <Module>
+                        } else {
+                            return Err("Target of field access is not a module.".to_string());
+                        }
+                    }
+                    _ => return Err("Expected function name or module access".to_string()),
                 };
 
-                // B. Retrieve the function code from our storage
-                // We verify it exists and is actually a FunctionDef
-                let func_stmt = self
-                    .functions
-                    .get(&func_name)
-                    .cloned() // Clone it so we don't fight the borrow checker
-                    .ok_or_else(|| format!("Undefined function: '{}'", func_name))?;
+                let func_stmt = func_stmt
+                    .ok_or_else(|| format!("Undefined function: '{}'", func_debug_name))?;
 
                 if let Statement::FunctionDef {
                     params,
@@ -279,7 +299,7 @@ impl Interpreter {
                     if params.len() != arg_values.len() {
                         return Err(format!(
                             "Function '{}' expects {} args, got {}.",
-                            func_name,
+                            func_debug_name,
                             params.len(),
                             arg_values.len()
                         ));
@@ -314,7 +334,7 @@ impl Interpreter {
                         }
                     }
                 } else {
-                    Err(format!("'{}' is not a function.", func_name))
+                    Err(format!("'{}' is not a function.", func_debug_name))
                 }
             }
 

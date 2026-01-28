@@ -5,6 +5,7 @@
 ## 🚀 Key Features
 
 - **Safe by Default**: Variables are immutable unless explicitly declared with `var`.
+- **Module System**: Organize code across multiple files with `import` and qualified access (`math.add`).
 - **Expressive Loops**: Powerful `loop` constructs with built-in filtering (`on`) and stepping (`per`).
 - **Pointers Made Easy**: Simple `ref` and `deref` syntax that compiles to safe Rust concurrency primitives (`Arc<Mutex>`).
 - **Async First**: Built-in `run` keyword to easily spawn asynchronous tasks.
@@ -29,7 +30,8 @@ Value your time? Just clone and run.
    ```
    This will:
    - Interpret the code immediately for feedback.
-   - Transpile the code to Rust in `kiro_build_cache/`.
+   - Recursively parse and compile all imported modules.
+   - Transpile the project to Rust in `kiro_build_cache/`.
    - Compile and execute the transpiled Rust binary.
 
 ---
@@ -67,108 +69,137 @@ Kiro uses a "sane default" approach to mutability.
 - **Deep Equality**: `==` and `!=` work deeply for Structs, Lists, and Maps.
 - **Size**: Use `len` to get the length of strings and collections (`len my_list`).
 
-### 2. Structs
+### 2. Module System (Separate Files)
 
-Kiro supports custom data structures. Struct names **must** start with a Capital letter, while fields use lowercase.
+Kiro supports code modularization. Any `.kiro` file in the same directory can be imported.
 
-**Definition** (No commas needed):
+**`math.kiro`**:
+
+```kiro
+fn add(a: num, b: num) {
+    return a + b
+}
+```
+
+**`main.kiro`**:
+
+```kiro
+import math
+
+fn main() {
+    var result = math.add(10, 20)
+    print result
+}
+main()
+```
+
+- **Qualified Access**: Use `module.member` to access exported functions or variables.
+- **Recursive Loading**: The compiler and interpreter automatically resolve dependencies.
+
+### 3. Structs & Mutation
+
+#### Definition & Initialization
+
+Struct names **must** start with a Capital letter. Fields use lowercase.
 
 ```kiro
 struct User {
     name: str
     age: num
-    active: bool
 }
+
+var u = User { name: "Kiro", age: 1 }
 ```
 
-**Initialization** (Commas required):
+#### Field Mutation
+
+Fields can be mutated if the struct instance is declared with `var`.
 
 ```kiro
-var u = User {
-    name: "Kiro",
-    age: 1,
-    active: true
-}
-print u.name
+var player = User { name: "Hero", age: 20 }
+player.age = 21 // OK!
 ```
 
-### 3. Collections
+### 4. Collections
 
 Kiro features strictly typed lists and maps with command-style operations.
 
 #### Lists
 
-**Initialization**:
-
 ```kiro
 var numbers = list num { 10, 20, 30 }
+print numbers at 0
+numbers push 40
 ```
-
-**Commands**:
-
-- `at`: Access element by index (`numbers at 0`).
-- `push`: Append an element (`numbers push 40`).
 
 #### Maps
 
-**Initialization** (Comma separated key-value pairs):
-
 ```kiro
 var scores = map str num { "Alice" 100, "Bob" 90 }
+print scores at "Alice"
 ```
 
-**Commands**:
-
-- `at`: Access value by key (`scores at "Alice"`).
-
-### 4. Control Flow
+### 5. Control Flow
 
 #### Conditionals (`on` / `off`)
 
-Instead of `if/else`, Kiro uses `on` (condition) and `off` (else).
-
 ```kiro
-var temperature = 30
-on (temperature > 25) {
-    print "It's hot!"
+on (x > 10) {
+    print "High"
 } off {
-    print "It's pleasant."
+    print "Low"
 }
 ```
 
-#### While Loop (`loop on`)
+#### Loops
+
+- **While**: `loop on (cond) { ... }`
+- **Iterator**: `loop i in 0..10 { ... }`
+- **Advanced**: `loop x in list per 2 on (x > 5) { ... }`
+
+#### Control Signals
+
+Kiro supports standard control flow signals within functions and loops:
+
+- `return value`: Exit function with a value.
+- `break`: Exit the innermost loop.
+- `continue`: Skip to the next iteration of the loop.
+
+### 6. Pointers & Memory (`ref` / `deref`)
+
+Kiro abstractly manages memory while giving you pointer-like behavior. References are thread-safe (`Arc<Mutex<T>>`).
 
 ```kiro
-var x = 0
-loop on (x < 5) {
-    print x
-    x = x + 1
-}
+var x = 10
+var ptr = ref x
+print deref ptr // Returns 10
+
+// Mutation via Pointer
+deref ptr = 20
+print x // Returns 20 (it was changed via the reference!)
 ```
 
-#### For Loop (`loop in`)
+**Auto-Deref**: Struct fields can be accessed directly on references: `ptr.name` instead of `(deref ptr).name`.
 
-The `loop in` construct works with ranges, lists, and even strings. It supports steps (`per`) and inline filters (`on`).
+### 7. Concurrency & Pipes
+
+#### Async Execution
+
+Use `run` to spawn a background task.
 
 ```kiro
-// Looping over a Range
-loop i in 0..10 {
-    print i
-}
-
-// Looping over a List
-var items = list str { "A", "B", "C" }
-loop item in items {
-    print item
-}
-
-// Advanced loop: Range 0-19, step by 2, only keep numbers > 10
-loop x in 0..20 per 2 on (x > 10) {
-    print x
-}
+run worker(id)
 ```
 
-### 5. Functions
+#### Pipes (Channels)
+
+Channels for safe communication between tasks.
+
+- `give p val`: Send value.
+- `take p`: Receive value (awaits).
+- `close p`: Close the channel.
+
+### 8. Functions
 
 Functions are declared with `fn`. Arguments must be typed.
 
@@ -182,99 +213,27 @@ add(10, 20)
 
 > **Note**: A `pure` keyword exists (`pure fn`) for future strict-mode implementations (side-effect free functions).
 
-### 6. Pointers & Memory (`ref` / `deref`)
-
-Kiro abstracts away complex memory management while giving you pointer-like behavior. References are thread-safe by default (compiling to `Arc<Mutex<T>>`).
-
-#### Standard Access
-
-```kiro
-var value = 100
-var ptr = ref value    // Create a reference
-print deref ptr        // Read value (100)
-```
-
-#### Auto-Deref (Structs)
-
-When you have a pointer to a struct, you don't need to manually dereference it to access fields. Kiro handles this automatically!
-
-```kiro
-var u = User { name: "Kiro", ... }
-var p = ref u
-
-// Works directly! (No 'deref' needed)
-print p.name
-```
-
-### 7. Concurrency & Pipes
-
-Kiro makes concurrency easy with the `run` keyword and **Pipes** (channels) for communication.
-
-#### Async Execution
-
-Spawning a background thread (async task) is as simple as using `run`.
-
-```kiro
-fn worker(id: num) {
-    print "Worker started"
-}
-
-run worker(1) // Runs immediately in the background
-print "Main thread continues"
-```
-
-#### Pipes (Channels)
-
-Pipes allow safe communication between threads. They compile to Rust's Multi-Producer Single-Consumer (MPSC) channels (or `async-channel`).
-
-1.  **Create a Pipe**: `var p = pipe num`
-2.  **Send Data (`give`)**: `give p 42`
-3.  **Receive Data (`take`)**: `var val = take p`
-4.  **Close Pipe**: `close p`
-
-**Example:**
-
-```kiro
-// 1. Create a pipe for numbers
-var p = pipe num
-
-fn sender(ch: pipe) {
-    print "Sending..."
-    give ch 100
-    give ch 200
-    close ch
-}
-
-// 2. Start sender in background
-run sender(p)
-
-// 3. Receive in main thread
-print take p  // Prints 100
-print take p  // Prints 200
-```
-
 ---
 
 ## 🏗️ Architecture
 
-Kiro uses a "Double Pass" system:
+Kiro uses a **Double Pass** system:
 
-1.  **Interpreter (`src/interpreter.rs`)**:
-    - Walks the AST (Tree Sitter) directly.
-    - Provides immediate, interactive feedback.
-    - Great for small scripts and debugging.
-2.  **Transpiler (`src/compiler.rs`)**:
-    - Converts Kiro AST into valid **Rust** code.
-    - Automatically builds a Cargo project in `kiro_build_cache`.
-    - Compiles the result for maximum performance and stability.
+1.  **Interpreter (`src/interpreter/`)**:
+    - Walks the AST and maintains a runtime environment.
+    - Recursively loads and executes imported modules in isolation.
+2.  **Transpiler (`src/compiler/`)**:
+    - Converts Kiro to idiomatic **Rust**.
+    - **Recursive Build**: The transpiler identifies dependencies and compiles them as Rust modules (`pub mod {name}`).
+    - Hoists struct definitions and imports to ensure valid Rust output.
 
 ## 🛠️ Project Structure
 
-- `main.kiro`: Your entry point source file.
-- `src/lib.rs`: Grammar definition (Rust Sitter).
-- `src/interpreter.rs`: Runtime logic for the interpreter.
-- `src/compiler.rs`: Logic for generating Rust code.
-- `src/build_manager.rs`: Handles the background `cargo` processes.
+- `src/grammar/`: Language rules and parser (Rust Sitter).
+- `src/interpreter/`: Recursive execution engine and value representations.
+- `src/compiler/`: Rust code generation logic.
+- `src/build_manager.rs`: Cargo project lifecycle management.
+- `main.kiro`: Entry point script.
 
 ---
 

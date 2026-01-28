@@ -6,18 +6,24 @@ impl Compiler {
     pub fn compile_statement(&mut self, statement: Statement) -> String {
         match statement {
             // 1. Compile Struct Definition
+            // 1. Compile Struct Definition
             Statement::StructDef { name, fields, .. } => {
                 let field_strs: Vec<String> = fields
                     .iter()
-                    .map(|f| format!("{}: {}", f.name.value, compile_type(&f.field_type)))
+                    .map(|f| format!("pub {}: {}", f.name.value, compile_type(&f.field_type)))
                     .collect();
 
                 // We add #[derive(Clone, Debug, PartialEq)] and impl KiroGet
                 format!(
-                    "#[derive(Clone, Debug, PartialEq)]\nstruct {0} {{ {1} }}\nimpl KiroGet for {0} {{ type Inner = Self; fn kiro_get<R>(&self, f: impl FnOnce(&Self::Inner) -> R) -> R {{ f(self) }} }}",
+                    "#[derive(Clone, Debug, PartialEq)]\npub struct {0} {{ {1} }}\nimpl KiroGet for {0} {{ type Inner = Self; fn kiro_get<R>(&self, f: impl FnOnce(&Self::Inner) -> R) -> R {{ f(self) }} }}",
                     name.value,
                     field_strs.join(", ")
                 )
+            }
+            // 6. Import Statement
+            Statement::Import { module_name, .. } => {
+                self.imported_modules.insert(module_name.clone());
+                format!("pub mod {};", module_name)
             }
             // 1. Variable Declaration
             Statement::VarDecl { ident, value, .. } => {
@@ -27,7 +33,7 @@ impl Compiler {
                 format!("let mut {} = {};", ident, val_str)
             }
 
-            // 2. Assignment (Mutation)
+            // ... (Middle assignments kept same, just copying context) ...
             Statement::AssignStmt { lhs, rhs, .. } => {
                 let rhs_str = self.compile_expr(rhs);
                 let lhs_str = self.compile_lvalue(lhs);
@@ -120,7 +126,7 @@ impl Compiler {
                 // We force return type to f64 for now (since we only have numbers)
                 // We append "; 0.0" to ensure the block returns a float even if it ends with print/void
                 format!(
-                    "async fn {}({}) -> f64 {{ {}; 0.0 }}",
+                    "pub async fn {}({}) -> f64 {{ {}; 0.0 }}",
                     name,
                     param_strs.join(", "),
                     body_str
@@ -155,6 +161,7 @@ impl Compiler {
             Statement::Continue(_) => "continue;".to_string(),
         }
     }
+
     pub fn compile_block(&mut self, block: grammar::Block) -> String {
         let len = block.statements.len();
         let mut lines = Vec::new();

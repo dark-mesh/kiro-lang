@@ -9,47 +9,82 @@ use std::fs;
 
 #[tokio::main]
 async fn main() {
-    let filename = "main.kiro";
-    println!("📖 Reading {}...", filename);
+    println!("🚀 Kiro Build System v0.2");
 
-    let source = match fs::read_to_string(filename) {
-        Ok(content) => content,
-        Err(_) => {
-            eprintln!("❌ Error: Could not find '{}'.", filename);
-            eprintln!("   Please create this file in the project root.");
+    // 1. Interpret Main (triggers interpreter recursive imports)
+    let filename = "main.kiro";
+
+    // Check existence
+    if !std::path::Path::new(filename).exists() {
+        eprintln!("❌ Error: '{}' not found.", filename);
+        return;
+    }
+
+    let source = fs::read_to_string(filename).unwrap();
+    let prog = match grammar::parse(&source) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Parse Error in main.kiro: {:?}", e);
             return;
         }
     };
-    match grammar::parse(&source) {
-        Ok(program) => {
-            println!("🤖 --- INTERPRETER OUTPUT ---");
-            let mut engine = interpreter::Interpreter::new();
-            // We re-parse specifically for the interpreter to avoid ownership headaches
-            let interpreter_prog = grammar::parse(&source).unwrap();
-            if let Err(e) = engine.run(interpreter_prog) {
-                eprintln!("Interpreter Error: {}", e);
-            }
-            // 1. Compile (Transpile)
-            let mut c = compiler::Compiler::new();
-            let rust_code = c.compile(program);
 
-            // 2. Manage Project Execution
-            let pm = BuildManager::new("kiro_build_cache");
+    println!("🤖 --- INTERPRETER ---");
+    let mut i = interpreter::Interpreter::new();
+    if let Err(e) = i.run(prog) {
+        eprintln!("Interpreter Error: {}", e);
+    }
 
-            if let Err(e) = pm.init() {
-                eprintln!("❌ Init Error: {}", e);
-                return;
-            }
+    // 2. Compile Project
+    println!("🔨 --- COMPILING ---");
+    let pm = BuildManager::new("kiro_build_cache");
+    if let Err(e) = pm.init() {
+        eprintln!("Init Error: {}", e);
+        return;
+    }
 
-            if let Err(e) = pm.save_code(rust_code) {
-                eprintln!("❌ Save Error: {}", e);
-                return;
-            }
+    let mut seen = std::collections::HashSet::new();
+    build_recursive("main", &mut seen, &pm);
 
-            if let Err(e) = pm.run() {
-                eprintln!("❌ Run Error: {}", e);
-            }
+    if let Err(e) = pm.run() {
+        eprintln!("Run Error: {}", e);
+    }
+}
+
+fn build_recursive(name: &str, seen: &mut std::collections::HashSet<String>, pm: &BuildManager) {
+    if seen.contains(name) {
+        return;
+    }
+    seen.insert(name.to_string());
+
+    let filename = format!("{}.kiro", name);
+    let src = match fs::read_to_string(&filename) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!(
+                "❌ Compiler Warning: File '{}' not found during build.",
+                filename
+            );
+            return;
         }
-        Err(e) => eprintln!("Parse Error: {:?}", e),
+    };
+
+    let prog = grammar::parse(&src).expect("Parse error during build");
+
+    // Find imports to recurse
+    for s in &prog.statements {
+        if let grammar::grammar::Statement::Import { module_name, .. } = s {
+            build_recursive(module_name, seen, pm);
+        }
+    }
+
+    // Compile
+    let mut c = compiler::Compiler::new();
+    let code = c.compile(prog, name == "main");
+
+    if let Err(e) = pm.save_file(name, code) {
+        eprintln!("Failed to save {}: {}", name, e);
+    } else {
+        println!("  - Compiled {}", name);
     }
 }

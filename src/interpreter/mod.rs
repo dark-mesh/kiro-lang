@@ -16,8 +16,8 @@ pub enum StmtResult {
 }
 
 pub struct Interpreter {
-    env: HashMap<String, Value>,
-    functions: HashMap<String, Statement>,
+    pub env: HashMap<String, Value>,
+    pub functions: HashMap<String, Statement>,
 }
 
 impl Interpreter {

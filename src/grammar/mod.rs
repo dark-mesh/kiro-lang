@@ -225,6 +225,14 @@ pub mod grammar {
         // 5. Continue Statement
         Continue(#[rust_sitter::leaf(text = "continue")] ()),
 
+        // 6. Import Statement
+        Import {
+            #[rust_sitter::leaf(text = "import")]
+            _import: (),
+            #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
+            module_name: String,
+        },
+
         ExprStmt(Expression),
         Print(#[rust_sitter::leaf(text = "print")] (), Expression),
     }

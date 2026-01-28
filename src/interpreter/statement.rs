@@ -287,6 +287,46 @@ impl Interpreter {
                 println!("⚠️ [Interpreter] 'close' is a no-op in test mode.");
                 Ok(StmtResult::Normal(RuntimeVal::Void))
             }
+            // 7. Import Logic
+            Statement::Import { module_name, .. } => {
+                let filename = format!("{}.kiro", module_name);
+                println!("📦 Importing {}...", filename);
+
+                // A. Read the file
+                let source = std::fs::read_to_string(&filename)
+                    .map_err(|_| format!("Module '{}' not found", filename))?;
+
+                // B. Parse it
+                // We need to access the parse function.
+                // Since main.rs uses grammar::parse, and grammar is crate::grammar::grammar
+                // We'll try crate::grammar::grammar::parse
+                let program = crate::grammar::grammar::parse(&source)
+                    .map_err(|e| format!("Parse error in {}: {:?}", filename, e))?;
+
+                // C. Create a fresh Interpreter for the module
+                // We need to use valid imports for Interpreter and Value
+                let mut module_interp = Interpreter::new();
+
+                // We need to call run, but run takes ownership of self usually?
+                // Interpreter::run(&mut self, program)
+                module_interp.run(program)?;
+
+                // D. Extract everything (since 'Everything is Public')
+                let mut exports = std::collections::HashMap::new();
+                for (key, val) in module_interp.env {
+                    exports.insert(key, val.data);
+                }
+
+                // E. Save as a Module in the current scope
+                self.env.insert(
+                    module_name,
+                    Value {
+                        data: RuntimeVal::Module(exports, module_interp.functions),
+                        is_mutable: false,
+                    },
+                );
+                Ok(StmtResult::Normal(RuntimeVal::Void))
+            }
         }
     }
     pub fn execute_block(&mut self, block: grammar::Block) -> Result<StmtResult, String> {

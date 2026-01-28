@@ -1,23 +1,12 @@
-fn test_ret() {
-    print "Start Function"
-    return 1
-    print "Unreachable"
+import math
+
+fn main() {
+    print "Testing Imports..."
+    var sum = math.add(10, 20)
+    print sum
+    
+    var diff = math.sub(sum, 5)
+    print diff
 }
 
-print "--- Testing Return ---"
-print test_ret()
-
-print "--- Testing Loop ---"
-var i = 0
-loop i in 0..6 {
-    on (i == 2) {
-        print "Skipping 2"
-        continue
-    }
-    on (i == 4) {
-        print "Breaking at 4"
-        break
-    }
-    print i
-}
-print "Done"
+main()

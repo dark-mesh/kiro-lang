@@ -1,0 +1,7 @@
+fn add(a: num, b: num) {
+    return a + b
+}
+
+fn sub(a: num, b: num) {
+    return a - b
+}
