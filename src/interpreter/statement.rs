@@ -1,5 +1,5 @@
 use super::Interpreter;
-use super::StmtResult; // New Enum
+use super::StatementResult; // New Enum
 use super::values::{RuntimeVal, Value};
 use crate::grammar::grammar::{self, Statement};
 
@@ -36,10 +36,10 @@ fn update_nested_field(
 }
 
 impl Interpreter {
-    pub fn execute_statement(&mut self, statement: Statement) -> Result<StmtResult, String> {
+    pub fn execute_statement(&mut self, statement: Statement) -> Result<StatementResult, String> {
         match statement {
             // Struct definitions are just Declarations, no runtime effect in interpreter
-            Statement::StructDef { .. } => Ok(StmtResult::Normal(RuntimeVal::Void)),
+            Statement::StructDef { .. } => Ok(StatementResult::Normal(RuntimeVal::Void)),
             // 1. Variable Declaration
             Statement::VarDecl { ident, value, .. } => {
                 let val = self.eval_expr(value)?;
@@ -50,7 +50,7 @@ impl Interpreter {
                         is_mutable: true, // New vars are always mutable in Kiro 1.0 logic
                     },
                 );
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
 
             // 2. Assignment (Top-level OR Field)
@@ -66,7 +66,7 @@ impl Interpreter {
                                 return Err(format!("ERROR: '{}' is immutable.", name));
                             }
                             entry.data = new_val;
-                            Ok(StmtResult::Normal(RuntimeVal::Void))
+                            Ok(StatementResult::Normal(RuntimeVal::Void))
                         } else {
                             Err(format!("ERROR: Variable '{}' not declared.", name))
                         }
@@ -110,7 +110,7 @@ impl Interpreter {
                         // 3. Drill down and Update
                         update_nested_field(&mut entry.data, path, new_val)?;
 
-                        Ok(StmtResult::Normal(RuntimeVal::Void))
+                        Ok(StatementResult::Normal(RuntimeVal::Void))
                     }
                     _ => Err("Invalid left-hand side for assignment.".to_string()),
                 }
@@ -119,10 +119,10 @@ impl Interpreter {
             // 3. Control Flow
             Statement::Return(_, expr) => {
                 let val = self.eval_expr(expr)?;
-                Ok(StmtResult::Return(val))
+                Ok(StatementResult::Return(val))
             }
-            Statement::Break(_) => Ok(StmtResult::Break),
-            Statement::Continue(_) => Ok(StmtResult::Continue),
+            Statement::Break(_) => Ok(StatementResult::Break),
+            Statement::Continue(_) => Ok(StatementResult::Continue),
 
             Statement::On {
                 condition,
@@ -138,7 +138,7 @@ impl Interpreter {
                     if let Some(clause) = else_clause {
                         self.execute_block(clause.body)
                     } else {
-                        Ok(StmtResult::Normal(RuntimeVal::Void))
+                        Ok(StatementResult::Normal(RuntimeVal::Void))
                     }
                 }
             }
@@ -152,13 +152,13 @@ impl Interpreter {
                     }
                     let res = self.execute_block(body.clone())?;
                     match res {
-                        StmtResult::Normal(_) => {}
-                        StmtResult::Continue => {} // Loop again
-                        StmtResult::Break => break,
-                        StmtResult::Return(v) => return Ok(StmtResult::Return(v)),
+                        StatementResult::Normal(_) => {}
+                        StatementResult::Continue => {} // Loop again
+                        StatementResult::Break => break,
+                        StatementResult::Return(v) => return Ok(StatementResult::Return(v)),
                     }
                 }
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             Statement::LoopIter {
                 iterator,
@@ -221,24 +221,24 @@ impl Interpreter {
                     if run_main {
                         let res = self.execute_block(body.clone())?;
                         match res {
-                            StmtResult::Normal(_) => {}
-                            StmtResult::Continue => {}
-                            StmtResult::Break => break_loop = true,
-                            StmtResult::Return(v) => {
+                            StatementResult::Normal(_) => {}
+                            StatementResult::Continue => {}
+                            StatementResult::Break => break_loop = true,
+                            StatementResult::Return(v) => {
                                 // Must restore env BEFORE returning!
                                 self.env = parent_env;
-                                return Ok(StmtResult::Return(v));
+                                return Ok(StatementResult::Return(v));
                             }
                         }
                     } else if let Some(off) = &else_clause {
                         let res = self.execute_block(off.body.clone())?;
                         match res {
-                            StmtResult::Normal(_) => {}
-                            StmtResult::Continue => {}
-                            StmtResult::Break => break_loop = true,
-                            StmtResult::Return(v) => {
+                            StatementResult::Normal(_) => {}
+                            StatementResult::Continue => {}
+                            StatementResult::Break => break_loop = true,
+                            StatementResult::Return(v) => {
                                 self.env = parent_env;
-                                return Ok(StmtResult::Return(v));
+                                return Ok(StatementResult::Return(v));
                             }
                         }
                     }
@@ -249,16 +249,16 @@ impl Interpreter {
                         break;
                     }
                 }
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             Statement::Print(_, expr) => {
                 let val = self.eval_expr(expr)?;
                 println!("{}", val);
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             Statement::ExprStmt(expr) => {
                 let val = self.eval_expr(expr)?;
-                Ok(StmtResult::Normal(val))
+                Ok(StatementResult::Normal(val))
             }
             stmt @ Statement::FunctionDef { .. } => {
                 if let Statement::FunctionDef { name, .. } = &stmt {
@@ -266,7 +266,7 @@ impl Interpreter {
                     self.functions.insert(func_name.clone(), stmt);
                     println!("✨ Registered Function: {}", func_name);
                 }
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             // 1. Give (Sync Send)
             Statement::Give(_, channel_expr, value_expr) => {
@@ -279,13 +279,13 @@ impl Interpreter {
                 } else {
                     return Err("Runtime Error: 'give' expects a pipe.".to_string());
                 }
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
 
             // 2. Close (Drop Sender)
             Statement::Close(_, _channel_expr) => {
                 println!("⚠️ [Interpreter] 'close' is a no-op in test mode.");
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             // 7. Import Logic
             Statement::Import { module_name, .. } => {
@@ -325,21 +325,21 @@ impl Interpreter {
                         is_mutable: false,
                     },
                 );
-                Ok(StmtResult::Normal(RuntimeVal::Void))
+                Ok(StatementResult::Normal(RuntimeVal::Void))
             }
         }
     }
-    pub fn execute_block(&mut self, block: grammar::Block) -> Result<StmtResult, String> {
+    pub fn execute_block(&mut self, block: grammar::Block) -> Result<StatementResult, String> {
         let mut last_val = RuntimeVal::Void;
 
         for stmt in block.statements {
             let res = self.execute_statement(stmt)?;
             match res {
-                StmtResult::Normal(v) => last_val = v,
+                StatementResult::Normal(v) => last_val = v,
                 // Bubble up control flow signals immediately!
                 _ => return Ok(res),
             }
         }
-        Ok(StmtResult::Normal(last_val))
+        Ok(StatementResult::Normal(last_val))
     }
 }

@@ -8,7 +8,7 @@ pub mod values;
 use values::{RuntimeVal, Value};
 
 #[derive(Debug, Clone)]
-pub enum StmtResult {
+pub enum StatementResult {
     Normal(RuntimeVal),
     Return(RuntimeVal),
     Break,
@@ -33,9 +33,9 @@ impl Interpreter {
             // If top-level statement returns Return/Break/Continue, that's an error
             // (or we could just exit logic, but standard is scripts only return via exit)
             match res {
-                StmtResult::Normal(_) => {}
-                StmtResult::Return(_) => return Ok(()), // Allow script to return
-                StmtResult::Break | StmtResult::Continue => {
+                StatementResult::Normal(_) => {}
+                StatementResult::Return(_) => return Ok(()), // Allow script to return
+                StatementResult::Break | StatementResult::Continue => {
                     return Err("Cannot break/continue outside of loop".to_string());
                 }
             }

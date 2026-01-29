@@ -326,9 +326,9 @@ impl Interpreter {
 
                     // Return the result of the function
                     match result_sig {
-                        super::StmtResult::Normal(v) => Ok(v),
-                        super::StmtResult::Return(v) => Ok(v),
-                        super::StmtResult::Break | super::StmtResult::Continue => {
+                        super::StatementResult::Normal(v) => Ok(v),
+                        super::StatementResult::Return(v) => Ok(v),
+                        super::StatementResult::Break | super::StatementResult::Continue => {
                             Err("Error: 'break' or 'continue' leaked from function body."
                                 .to_string())
                         }
