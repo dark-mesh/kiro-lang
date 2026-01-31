@@ -49,10 +49,12 @@ pub mod grammar {
         Str, // New
         #[rust_sitter::leaf(text = "bool")]
         Bool, // New
+        #[rust_sitter::leaf(text = "void")]
+        Void,
         #[rust_sitter::leaf(text = "adr")]
-        Adr,
+        Adr(#[rust_sitter::leaf(text = "adr")] (), Box<KiroType>),
         #[rust_sitter::leaf(text = "pipe")]
-        Pipe,
+        Pipe(#[rust_sitter::leaf(text = "pipe")] (), Box<KiroType>),
 
         // 1. Recursive Types for Collections
         // list <type>
@@ -204,6 +206,10 @@ pub mod grammar {
             #[rust_sitter::leaf(text = ")")]
             _r: (),
 
+            #[rust_sitter::leaf(text = "->")]
+            _arrow: Option<()>,
+            return_type: Option<KiroType>,
+
             body: Block,
         },
         // 1. Give: give <channel> <value>
@@ -219,7 +225,8 @@ pub mod grammar {
             Expression, // Channel
         ),
         // 3. Return Statement
-        Return(#[rust_sitter::leaf(text = "return")] (), Expression),
+        #[rust_sitter::prec_right(1)]
+        Return(#[rust_sitter::leaf(text = "return")] (), Option<Expression>),
         // 4. Break Statement
         Break(#[rust_sitter::leaf(text = "break")] ()),
         // 5. Continue Statement
@@ -253,7 +260,7 @@ pub mod grammar {
 
         // 2. List Initialization
         // list num { 1, 2, 3 }
-        #[rust_sitter::prec_left(1)]
+        #[rust_sitter::prec_left(2)]
         ListInit(
             #[rust_sitter::leaf(text = "list")] (),
             #[allow(dead_code)] KiroType, // The inner type (e.g. num)
@@ -264,7 +271,7 @@ pub mod grammar {
 
         // 3. Map Initialization
         // map str num { "A" 1, "B" 2 }
-        #[rust_sitter::prec_left(1)]
+        #[rust_sitter::prec_left(2)]
         MapInit(
             #[rust_sitter::leaf(text = "map")] (),
             #[allow(dead_code)] KiroType, // Key Type
@@ -311,10 +318,10 @@ pub mod grammar {
         Variable(VariableVal),
 
         #[rust_sitter::prec_left(1)]
-        PipeInit(
-            #[rust_sitter::leaf(text = "pipe")] (),
-            KiroType, // The type of data in the pipe
-        ),
+        AdrInit(#[rust_sitter::leaf(text = "adr")] (), KiroType),
+
+        #[rust_sitter::prec_left(1)]
+        PipeInit(#[rust_sitter::leaf(text = "pipe")] (), KiroType),
 
         // 4. Take: take <channel>
         // Example: var x = take p

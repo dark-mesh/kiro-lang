@@ -72,6 +72,14 @@ impl Interpreter {
                 Ok(RuntimeVal::Pipe(tx, Arc::new(Mutex::new(rx))))
             }
 
+            // Adr Init
+            Expression::AdrInit(_, _) => {
+                // For interpreter, we can treat lazy pointers as Void until assigned?
+                // Or implementing a special "None" value?
+                // Currently returning Void which matches Option::None behavior loosely in untyped interpreter.
+                Ok(RuntimeVal::Void)
+            }
+
             // 4. Take (Sync Receive)
             Expression::Take(_, channel_expr) => {
                 let chan = self.eval_expr(*channel_expr)?;

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Kiro",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#entities"
+    },
+    {
+      "include": "#functions"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.kiro",
+          "match": "\\/\\/.*$"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.kiro",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.kiro",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.kiro",
+          "match": "\\b(return|break|continue|on|off|loop|in|per|if|while|for)\\b"
+        },
+        {
+          "name": "storage.type.kiro",
+          "match": "\\b(fn|struct|var|import)\\b"
+        },
+        {
+          "name": "keyword.other.kiro",
+          "match": "\\b(pure|run|give|take|close)\\b"
+        },
+        {
+          "name": "keyword.operator.kiro",
+          "match": "\\b(ref|deref|push|at)\\b"
+        },
+        {
+          "name": "support.function.kiro",
+          "match": "\\b(print|len)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.kiro",
+          "match": "\\b(num|str|bool|adr|pipe|list|map)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.kiro",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.numeric.kiro",
+          "match": "\\b\\d+(\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "entities": {
+      "patterns": [
+        {
+          "name": "entity.name.type.kiro",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.kiro"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "scopeName": "source.kiro"
+}

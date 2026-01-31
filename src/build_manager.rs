@@ -36,14 +36,21 @@ impl BuildManager {
     pub fn run(&self) -> Result<(), String> {
         println!("🚀 Compiling and Running...\n");
 
-        let status = Command::new("cargo")
+        let output = Command::new("cargo")
             .arg("run")
             .arg("--quiet") // Less noise
             .current_dir(&self.build_dir)
-            .status()
+            .output()
             .map_err(|e| format!("Failed to execute cargo: {}", e))?;
 
-        if status.success() {
+        if !output.stdout.is_empty() {
+            println!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        if !output.stderr.is_empty() {
+            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        }
+
+        if output.status.success() {
             Ok(())
         } else {
             Err("Runtime execution failed.".to_string())

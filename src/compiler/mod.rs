@@ -28,7 +28,7 @@ impl Compiler {
             // We make everything 'pub' so submodules can use them via 'use crate::*;'
             output.push_str(
                 r#"
-                #[derive(Clone)]
+                #[derive(Clone, Debug)]
                 pub struct KiroPipe<T> {
                     pub tx: async_channel::Sender<T>,
                     pub rx: async_channel::Receiver<T>,
@@ -90,6 +90,18 @@ impl Compiler {
                 impl AsKiroLoopVar for f64 { type Out = f64; fn as_kiro(self) -> f64 { self } }
                 impl AsKiroLoopVar for char { type Out = String; fn as_kiro(self) -> String { self.to_string() } }
                 impl AsKiroLoopVar for String { type Out = String; fn as_kiro(self) -> String { self } }
+
+                // --- KIRO ASSIGN ---
+                pub trait KiroAssign<Rhs> { fn kiro_assign(&mut self, rhs: Rhs); }
+                // Default Assignment (Same Types)
+                impl<T> KiroAssign<T> for T { fn kiro_assign(&mut self, rhs: T) { *self = rhs; } }
+                // Special Assignment: adr void (usize) = adr T (Option<Arc<Mutex<T>>>)
+                impl<T> KiroAssign<Option<std::sync::Arc<std::sync::Mutex<T>>>> for usize {
+                    fn kiro_assign(&mut self, rhs: Option<std::sync::Arc<std::sync::Mutex<T>>>) {
+                        // We take the address of the Arc inner pointer if it exists
+                        *self = rhs.as_ref().map(|a| std::sync::Arc::as_ptr(a) as usize).unwrap_or(0);
+                    }
+                }
                 "#,
             );
         } else {

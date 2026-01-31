@@ -15,7 +15,7 @@ impl Compiler {
 
                 // We add #[derive(Clone, Debug, PartialEq)] and impl KiroGet
                 format!(
-                    "#[derive(Clone, Debug, PartialEq)]\npub struct {0} {{ {1} }}\nimpl KiroGet for {0} {{ type Inner = Self; fn kiro_get<R>(&self, f: impl FnOnce(&Self::Inner) -> R) -> R {{ f(self) }} }}",
+                    "#[derive(Clone, Debug)]\npub struct {0} {{ {1} }}\nimpl KiroGet for {0} {{ type Inner = Self; fn kiro_get<R>(&self, f: impl FnOnce(&Self::Inner) -> R) -> R {{ f(self) }} }}",
                     name.value,
                     field_strs.join(", ")
                 )
@@ -37,7 +37,7 @@ impl Compiler {
             Statement::AssignStmt { lhs, rhs, .. } => {
                 let rhs_str = self.compile_expr(rhs);
                 let lhs_str = self.compile_lvalue(lhs);
-                format!("{} = {};", lhs_str, rhs_str)
+                format!("{}.kiro_assign({});", lhs_str, rhs_str)
             }
             Statement::Print(_, expr) => {
                 let val = self.compile_expr(expr);
@@ -111,7 +111,11 @@ impl Compiler {
                 )
             }
             Statement::FunctionDef {
-                name, params, body, ..
+                name,
+                params,
+                return_type,
+                body,
+                ..
             } => {
                 // In Kiro, functions are async by default (for 'run')
                 // We ignore 'pure' in transpilation (it's a safety check, not a syntax change)
@@ -123,12 +127,28 @@ impl Compiler {
 
                 let body_str = self.compile_block(body);
 
-                // We force return type to f64 for now (since we only have numbers)
-                // We append "; 0.0" to ensure the block returns a float even if it ends with print/void
+                let ret_type = if let Some(rt) = return_type {
+                    if let crate::grammar::grammar::KiroType::Void = rt {
+                        "()".to_string()
+                    } else {
+                        compile_type(&rt)
+                    }
+                } else {
+                    "()".to_string()
+                };
+
+                // We append "; Default::default()" to try to satisfy return types if block is void-ish
+                // But generally, the block should return the value.
+                // For proper transpiring, we rely on Rust's implicit return.
+                // However, adding a fallback for void/unit might be needed.
+                // For now, let's trust the block returns the right thing or user wrote 'return'.
+                // EXCEPT: Kiro semantics might allow implicit return of last expr.
+                // Rust does too. compile_block returns a block "{ stmts }"
                 format!(
-                    "pub async fn {}({}) -> f64 {{ {}; 0.0 }}",
+                    "pub async fn {}({}) -> {} {}",
                     name,
                     param_strs.join(", "),
+                    ret_type,
                     body_str
                 )
             }
@@ -152,8 +172,12 @@ impl Compiler {
             }
             // 3. Return -> return ...
             Statement::Return(_, expr) => {
-                let val = self.compile_expr(expr);
-                format!("return {};", val)
+                if let Some(e) = expr {
+                    let val = self.compile_expr(e);
+                    format!("return {};", val)
+                } else {
+                    "return;".to_string()
+                }
             }
             // 4. Break -> break
             Statement::Break(_) => "break;".to_string(),

@@ -54,9 +54,35 @@ impl Compiler {
                 grammar::BoolVal::True(_) => "true".to_string(),
                 grammar::BoolVal::False(_) => "false".to_string(),
             },
-            Expression::PipeInit(_, _type) => {
-                // Ignore type for now, assume f64 (or use it if we implemented generics)
-                "{ let (tx, rx) = async_channel::unbounded(); KiroPipe { tx, rx } }".to_string()
+
+            // Adr Init (Lazy / Void)
+            Expression::AdrInit(_, inner) => {
+                if let grammar::KiroType::Void = inner {
+                    // adr void -> usize 0
+                    "0usize".to_string()
+                } else {
+                    // adr T -> Option<...> = None
+                    let type_str = crate::compiler::types::compile_type(&inner);
+                    format!(
+                        "Option::<std::sync::Arc<std::sync::Mutex<{}>>>::None",
+                        type_str
+                    )
+                }
+            }
+
+            // Pipe Init
+            Expression::PipeInit(_, pipe_type) => {
+                let inner_type = crate::compiler::types::compile_type(&pipe_type);
+                if let grammar::KiroType::Void = pipe_type {
+                    // KiroPipe<()>
+                    "{ let (tx, rx) = async_channel::unbounded(); KiroPipe::<()> { tx, rx } }"
+                        .to_string()
+                } else {
+                    format!(
+                        "{{ let (tx, rx) = async_channel::unbounded(); KiroPipe::<{}> {{ tx, rx }} }}",
+                        inner_type
+                    )
+                }
             }
 
             // 6. Take -> .rx.recv().await
@@ -66,15 +92,23 @@ impl Compiler {
             }
             // New Pointer Logic
             Expression::Ref(_, target) => {
-                // ref x  ->  Arc::new(Mutex::new(x))
+                // ref x  ->  Some(Arc::new(Mutex::new(x)))
                 let val = self.compile_expr(*target);
-                format!("std::sync::Arc::new(std::sync::Mutex::new({}))", val)
+                format!("Some(std::sync::Arc::new(std::sync::Mutex::new({})))", val)
             }
             Expression::Deref(_, target) => {
-                // deref x  ->  *(x.lock().unwrap())
+                // deref x
+                // If x is regular Adr (Option<Arc...>), we unwrap.
+                // If x is Adr<Void> (usize), we panic or forbid?
+                // The implementation plan says "Prohibitions (Strict Checks): Dereference: Check if target is Adr(Void)."
+                // NOTE: We don't have type info of expressions easily available here in `compile_expr` without a type checker step.
+                // However, Rust compilation will fail if we try to unwrap a usize.
+                // Standard Adr: x.as_ref().unwrap().lock().unwrap()
                 let ptr = self.compile_expr(*target);
-                // We lock the mutex, unwrap the result (crash on poison), and dereference the guard
-                format!("*({}.lock().unwrap())", ptr)
+                format!(
+                    "*({}.as_ref().expect(\"Dereferencing Void/Null Pointer\").lock().unwrap())",
+                    ptr
+                )
             }
 
             // 2. List Init -> vec![...]

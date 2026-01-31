@@ -12,7 +12,12 @@ async fn main() {
     println!("🚀 Kiro Build System v0.2");
 
     // 1. Interpret Main (triggers interpreter recursive imports)
-    let filename = "main.kiro";
+    let args: Vec<String> = std::env::args().collect();
+    let filename = if args.len() > 1 {
+        &args[1]
+    } else {
+        "main.kiro"
+    };
 
     // Check existence
     if !std::path::Path::new(filename).exists() {
@@ -24,7 +29,7 @@ async fn main() {
     let prog = match grammar::parse(&source) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Parse Error in main.kiro: {:?}", e);
+            eprintln!("Parse Error in {}: {:?}", filename, e);
             return;
         }
     };
@@ -43,15 +48,25 @@ async fn main() {
         return;
     }
 
-    let mut seen = std::collections::HashSet::new();
-    build_recursive("main", &mut seen, &pm);
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let name = std::path::Path::new(filename)
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    build_recursive(name, &mut seen, &pm, true);
 
     if let Err(e) = pm.run() {
         eprintln!("Run Error: {}", e);
     }
 }
 
-fn build_recursive(name: &str, seen: &mut std::collections::HashSet<String>, pm: &BuildManager) {
+fn build_recursive(
+    name: &str,
+    seen: &mut std::collections::HashSet<String>,
+    pm: &BuildManager,
+    is_root: bool,
+) {
     if seen.contains(name) {
         return;
     }
@@ -74,16 +89,17 @@ fn build_recursive(name: &str, seen: &mut std::collections::HashSet<String>, pm:
     // Find imports to recurse
     for s in &prog.statements {
         if let grammar::grammar::Statement::Import { module_name, .. } = s {
-            build_recursive(module_name, seen, pm);
+            build_recursive(module_name, seen, pm, false);
         }
     }
 
     // Compile
     let mut c = compiler::Compiler::new();
-    let code = c.compile(prog, name == "main");
+    let code = c.compile(prog, is_root);
 
-    if let Err(e) = pm.save_file(name, code) {
-        eprintln!("Failed to save {}: {}", name, e);
+    let save_name = if is_root { "main" } else { name };
+    if let Err(e) = pm.save_file(save_name, code) {
+        eprintln!("Failed to save {}: {}", save_name, e);
     } else {
         println!("  - Compiled {}", name);
     }

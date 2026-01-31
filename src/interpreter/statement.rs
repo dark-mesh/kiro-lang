@@ -117,9 +117,13 @@ impl Interpreter {
             }
 
             // 3. Control Flow
-            Statement::Return(_, expr) => {
-                let val = self.eval_expr(expr)?;
-                Ok(StatementResult::Return(val))
+            Statement::Return(_, expr_opt) => {
+                if let Some(expr) = expr_opt {
+                    let val = self.eval_expr(expr)?;
+                    Ok(StatementResult::Return(val))
+                } else {
+                    Ok(StatementResult::Return(RuntimeVal::Void))
+                }
             }
             Statement::Break(_) => Ok(StatementResult::Break),
             Statement::Continue(_) => Ok(StatementResult::Continue),

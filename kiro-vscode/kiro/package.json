@@ -1,0 +1,39 @@
+{
+  "name": "kiro",
+  "displayName": "Kiro",
+  "description": "Language Support for Kiro",
+  "icon": "kiro-logo.png",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.108.1"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "kiro",
+        "aliases": [
+          "Kiro",
+          "kiro"
+        ],
+        "extensions": [
+          ".kiro"
+        ],
+        "icon": {
+          "light": "./kiro-logo.png",
+          "dark": "./kiro-logo.png"
+        },
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kiro",
+        "scopeName": "source.kiro",
+        "path": "./syntaxes/kiro.tmLanguage.json"
+      }
+    ]
+  }
+}
