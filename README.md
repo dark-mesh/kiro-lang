@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="kiro-logo.png" width="400" alt="Kiro Logo">
+</p>
+
 # 🌀 Kiro Language
 
 **Kiro** is a modern, experimental programming language designed to explore the intersection of high-level expressivity and low-level performance concepts. It features a dual-execution model (Interpreter + Transpiler to Rust) and introduces unique syntax for flow control and concurrency.
