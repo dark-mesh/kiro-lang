@@ -38,6 +38,14 @@ fn update_nested_field(
 impl Interpreter {
     pub fn execute_statement(&mut self, statement: Statement) -> Result<StatementResult, String> {
         match statement {
+            // Error definitions register the type and description
+            Statement::ErrorDef {
+                name, description, ..
+            } => {
+                let desc = description.map(|d| d.value.value).unwrap_or_default();
+                self.error_types.insert(name.clone(), desc);
+                Ok(StatementResult::Normal(RuntimeVal::Void))
+            }
             // Struct definitions are just Declarations, no runtime effect in interpreter
             Statement::StructDef { .. } => Ok(StatementResult::Normal(RuntimeVal::Void)),
             // 1. Variable Declaration
@@ -68,7 +76,17 @@ impl Interpreter {
                             entry.data = new_val;
                             Ok(StatementResult::Normal(RuntimeVal::Void))
                         } else {
-                            Err(format!("ERROR: Variable '{}' not declared.", name))
+                            // NEW: Immutable Declaration (First Assignment)
+                            // If it doesn't exist, we create it as IMMUTABLE.
+                            // "const x = 10" is achieved by "x = 10"
+                            self.env.insert(
+                                name,
+                                Value {
+                                    data: new_val,
+                                    is_mutable: false, // Immutable by default!
+                                },
+                            );
+                            Ok(StatementResult::Normal(RuntimeVal::Void))
                         }
                     }
                     // Complex: x.y.z = 10
@@ -132,11 +150,36 @@ impl Interpreter {
                 condition,
                 body,
                 else_clause,
+                error_clause,
                 ..
             } => {
-                let result = self.eval_expr(condition)?.as_float()?;
-                if result != 0.0 {
-                    // Bubble up the result (could be Break/Return!)
+                let val = self.eval_expr(condition)?;
+
+                // Check if value is an Error
+                if let RuntimeVal::Error(ref err_name, _) = val {
+                    // Try to match against error clause
+                    if let Some(clause) = error_clause {
+                        // If error_type is None, it's a catch-all
+                        if clause.error_type.is_none()
+                            || clause.error_type.as_ref() == Some(err_name)
+                        {
+                            return self.execute_block(clause.body);
+                        }
+                    }
+                    // If no clause matched, propagate the error
+                    return Err(format!("Unhandled error: {}", err_name));
+                }
+
+                // Standard truthy check for non-error values
+                let is_truthy = match &val {
+                    RuntimeVal::Float(f) => *f != 0.0,
+                    RuntimeVal::Bool(b) => *b,
+                    RuntimeVal::String(s) => !s.is_empty(),
+                    RuntimeVal::Void => false,
+                    _ => true,
+                };
+
+                if is_truthy {
                     self.execute_block(body)
                 } else {
                     if let Some(clause) = else_clause {
@@ -256,6 +299,9 @@ impl Interpreter {
                 Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             Statement::Print(_, expr) => {
+                if self.in_pure_mode {
+                    return Err("Pure Function Error: 'print' is forbidden.".to_string());
+                }
                 let val = self.eval_expr(expr)?;
                 println!("{}", val);
                 Ok(StatementResult::Normal(RuntimeVal::Void))
@@ -274,6 +320,9 @@ impl Interpreter {
             }
             // 1. Give (Sync Send)
             Statement::Give(_, channel_expr, value_expr) => {
+                if self.in_pure_mode {
+                    return Err("Pure Function Error: 'give' is forbidden.".to_string());
+                }
                 let chan = self.eval_expr(channel_expr)?;
                 let val = self.eval_expr(value_expr)?.as_float()?;
 

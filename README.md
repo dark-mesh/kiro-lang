@@ -9,6 +9,7 @@
 ## 🚀 Key Features
 
 - **Safe by Default**: Variables are immutable unless explicitly declared with `var`.
+- **Pure Functions**: Strict `pure fn` keyword ensures functions are side-effect free and deterministic.
 - **Module System**: Organize code across multiple files with `import` and qualified access (`math.add`).
 - **Expressive Loops**: Powerful `loop` constructs with built-in filtering (`on`) and stepping (`per`).
 - **Pointers Made Easy**: Simple `ref` and `deref` syntax that compiles to safe Rust concurrency primitives (`Arc<Mutex>`).
@@ -247,7 +248,25 @@ do_nothing()
 - **Void Functions**: If the return type is omitted, it defaults to `void`.
 - **Explicit Return**: Use `-> type` to specify the return value.
 
-> **Note**: A `pure` keyword exists (`pure fn`) for future strict-mode implementations (side-effect free functions).
+#### Pure Functions
+
+Use the `pure` keyword to declare side-effect free functions. Pure functions are enforced at both the Interpreter and Transpiler levels.
+
+```kiro
+pure fn add(a: num, b: num) -> num {
+    return a + b
+}
+
+fn main() {
+    print add(10, 20)
+}
+```
+
+**Strict Constraints:**
+
+1. **No IO**: `print`, `give`, and `take` are forbidden inside `pure` functions.
+2. **Immutable Arguments**: You cannot pass a mutable variable (`var x`) to a pure function. Only literals or immutable variables are allowed.
+3. **No Side Effects**: Pure functions cannot mutate data outside their own local scope.
 
 ---
 

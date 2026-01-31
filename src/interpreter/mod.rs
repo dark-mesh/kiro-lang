@@ -18,6 +18,8 @@ pub enum StatementResult {
 pub struct Interpreter {
     pub env: HashMap<String, Value>,
     pub functions: HashMap<String, Statement>,
+    pub in_pure_mode: bool,
+    pub error_types: HashMap<String, String>, // name -> description
 }
 
 impl Interpreter {
@@ -25,6 +27,8 @@ impl Interpreter {
         Self {
             env: HashMap::new(),
             functions: HashMap::new(),
+            in_pure_mode: false,
+            error_types: HashMap::new(),
         }
     }
     pub fn run(&mut self, program: grammar::Program) -> Result<(), String> {

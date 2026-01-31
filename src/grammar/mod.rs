@@ -127,6 +127,14 @@ pub mod grammar {
             #[rust_sitter::leaf(text = "}")]
             _r: (),
         },
+        // Error Definition: error NotFound = "Description"
+        ErrorDef {
+            #[rust_sitter::leaf(text = "error")]
+            _error: (),
+            #[rust_sitter::leaf(pattern = r"[A-Z][a-zA-Z0-9]*", transform = |s| s.to_string())]
+            name: String,
+            description: Option<ErrorDesc>,
+        },
         // 1. Variable Declaration: var x = 10
         VarDecl {
             #[rust_sitter::leaf(text = "var")]
@@ -144,6 +152,7 @@ pub mod grammar {
             _eq: (),
             rhs: Expression,
         },
+        #[rust_sitter::prec_right(1)]
         On {
             #[rust_sitter::leaf(text = "on")]
             _on: (),
@@ -155,6 +164,8 @@ pub mod grammar {
             body: Block,
             // The 'off' part is optional (Option<Box<...>>)
             else_clause: Option<OffClause>,
+            // Single error handler (for now, to avoid grammar conflict)
+            error_clause: Option<ErrorClause>,
         },
         LoopOn {
             #[rust_sitter::leaf(text = "loop")]
@@ -445,6 +456,21 @@ pub mod grammar {
     pub struct OffClause {
         #[rust_sitter::leaf(text = "off")]
         _off: (),
+        pub body: Block,
+    }
+    #[derive(Debug, Clone)]
+    pub struct ErrorDesc {
+        #[rust_sitter::leaf(text = "=")]
+        _eq: (),
+        pub value: StringVal,
+    }
+    #[derive(Debug, Clone)]
+    pub struct ErrorClause {
+        #[rust_sitter::leaf(text = "error")]
+        _error: (),
+        // Optional error type (e.g., NotFound). None = catch-all handler.
+        #[rust_sitter::leaf(pattern = r"[A-Z][a-zA-Z0-9]*", transform = |s| s.to_string())]
+        pub error_type: Option<String>,
         pub body: Block,
     }
     #[derive(Debug, Clone)]

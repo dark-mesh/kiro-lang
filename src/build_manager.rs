@@ -76,7 +76,8 @@ impl BuildManager {
 
             [dependencies]
             {}
-            {} 
+            {}
+            anyhow = "1"
             "#,
             tokio_dep, async_channel_dep
         );

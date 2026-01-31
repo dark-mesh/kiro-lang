@@ -5,6 +5,19 @@ use crate::grammar::grammar::{self, Statement};
 impl Compiler {
     pub fn compile_statement(&mut self, statement: Statement) -> String {
         match statement {
+            // Error Definition: error NotFound = "Description"
+            Statement::ErrorDef {
+                name, description, ..
+            } => {
+                // d.value.value contains the raw string WITH quotes, we need to strip them
+                let desc = description
+                    .map(|d| d.value.value.trim_matches('"').to_string())
+                    .unwrap_or_else(|| name.clone());
+                // Generate a helper function that creates an anyhow error
+                format!(
+                    "fn kiro_error_{name}() -> anyhow::Error {{ anyhow::anyhow!(\"{desc}\").context(\"{name}\") }}"
+                )
+            }
             // 1. Compile Struct Definition
             // 1. Compile Struct Definition
             Statement::StructDef { name, fields, .. } => {
@@ -28,7 +41,8 @@ impl Compiler {
             // 1. Variable Declaration
             Statement::VarDecl { ident, value, .. } => {
                 let val_str = self.compile_expr(value);
-                self.known_vars.insert(ident.clone());
+                self.known_vars
+                    .insert(ident.clone(), super::VarInfo { is_mutable: true });
                 // In Kiro, vars are mutable by default
                 format!("let mut {} = {};", ident, val_str)
             }
@@ -36,10 +50,39 @@ impl Compiler {
             // ... (Middle assignments kept same, just copying context) ...
             Statement::AssignStmt { lhs, rhs, .. } => {
                 let rhs_str = self.compile_expr(rhs);
-                let lhs_str = self.compile_lvalue(lhs);
-                format!("{}.kiro_assign({});", lhs_str, rhs_str)
+
+                match lhs {
+                    grammar::Expression::Variable(v) => {
+                        let name = v.value;
+                        if let Some(info) = self.known_vars.get(&name) {
+                            if info.is_mutable {
+                                // Mutable Assignment
+                                format!("{}.kiro_assign({});", name, rhs_str)
+                            } else {
+                                // Immutable Assignment -> Error
+                                panic!(
+                                    "Compiler Error: Cannot mutate immutable variable '{}'.",
+                                    name
+                                );
+                            }
+                        } else {
+                            // Implicit Immutable Declaration (x = 10)
+                            self.known_vars
+                                .insert(name.clone(), super::VarInfo { is_mutable: false });
+                            format!("let {} = {};", name, rhs_str)
+                        }
+                    }
+                    _ => {
+                        // Complex LValue (e.g. x.y = 10)
+                        let lhs_str = self.compile_lvalue(lhs);
+                        format!("{}.kiro_assign({});", lhs_str, rhs_str)
+                    }
+                }
             }
             Statement::Print(_, expr) => {
+                if self.in_pure_context {
+                    panic!("Pure Function Error: 'print' is forbidden.");
+                }
                 let val = self.compile_expr(expr);
                 format!("println!(\"{{}}\", {});", val)
             }
@@ -47,17 +90,37 @@ impl Compiler {
                 condition,
                 body,
                 else_clause,
+                error_clause,
                 ..
             } => {
                 let cond_str = self.compile_expr(condition);
                 let body_str = self.compile_block(body);
 
-                let else_str = match else_clause {
-                    Some(clause) => format!("else {}", self.compile_block(clause.body)),
-                    None => String::new(),
-                };
+                // If there is an error clause, generate a match on Result
+                if let Some(clause) = error_clause {
+                    let clause_body = self.compile_block(clause.body);
+                    let err_branch = if let Some(err_type) = clause.error_type {
+                        format!(
+                            "if __kiro_err.to_string().contains(\"{}\") {} else {{ panic!(\"Unhandled error: {{}}\", __kiro_err); }}",
+                            err_type, clause_body
+                        )
+                    } else {
+                        // Catch-all
+                        clause_body
+                    };
 
-                format!("if {} {} {}", cond_str, body_str, else_str)
+                    format!(
+                        "match {} {{ Ok(__kiro_val) => {} Err(__kiro_err) => {{ {} }} }}",
+                        cond_str, body_str, err_branch
+                    )
+                } else {
+                    // Standard if/else
+                    let else_str = match else_clause {
+                        Some(clause) => format!("else {}", self.compile_block(clause.body)),
+                        None => String::new(),
+                    };
+                    format!("if ({}) != 0.0 {} {}", cond_str, body_str, else_str)
+                }
             }
             Statement::LoopOn {
                 condition, body, ..
@@ -103,7 +166,8 @@ impl Compiler {
                 };
 
                 // Implicit Mutability Rule:
-                self.known_vars.insert(iterator.clone());
+                self.known_vars
+                    .insert(iterator.clone(), super::VarInfo { is_mutable: false });
 
                 format!(
                     "for {}_temp in {} {{ let {} = {}_temp.as_kiro(); {} }}",
@@ -115,8 +179,18 @@ impl Compiler {
                 params,
                 return_type,
                 body,
+                pure_kw,
                 ..
             } => {
+                let is_pure = pure_kw.is_some();
+                self.functions
+                    .insert(name.clone(), super::FunctionInfo { is_pure });
+
+                let old_context = self.in_pure_context;
+                if is_pure {
+                    self.in_pure_context = true;
+                }
+
                 // In Kiro, functions are async by default (for 'run')
                 // We ignore 'pure' in transpilation (it's a safety check, not a syntax change)
 
@@ -126,6 +200,8 @@ impl Compiler {
                     .collect();
 
                 let body_str = self.compile_block(body);
+
+                self.in_pure_context = old_context;
 
                 let ret_type = if let Some(rt) = return_type {
                     if let crate::grammar::grammar::KiroType::Void = rt {
@@ -159,6 +235,9 @@ impl Compiler {
                 format!("{};", val)
             }
             Statement::Give(_, channel, value) => {
+                if self.in_pure_context {
+                    panic!("Pure Function Error: 'give' is forbidden.");
+                }
                 let ch = self.compile_expr(channel);
                 let val = self.compile_expr(value);
                 // We use unwrap() because if the receiver is closed, panic is appropriate for now

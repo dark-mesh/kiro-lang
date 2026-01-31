@@ -81,7 +81,11 @@ impl Interpreter {
             }
 
             // 4. Take (Sync Receive)
+            // 4. Take (Sync Receive)
             Expression::Take(_, channel_expr) => {
+                if self.in_pure_mode {
+                    return Err("Pure Function Error: 'take' is forbidden.".to_string());
+                }
                 let chan = self.eval_expr(*channel_expr)?;
 
                 if let RuntimeVal::Pipe(_, rx_mutex) = chan {
@@ -280,12 +284,32 @@ impl Interpreter {
                 if let Statement::FunctionDef {
                     params,
                     body,
-                    pure_kw: _,
+                    pure_kw,
                     ..
                 } = func_stmt
                 {
                     // C. Purity Check (The "Sandbox")
-                    // If pure_kw is Some, we should enable strict mode (TODO for next step)
+                    if pure_kw.is_some() {
+                        // Check Argument Safety (Must be Immutable)
+                        for arg_expr in &args {
+                            let mut current = arg_expr;
+                            // Unwrap FieldAccess to find root
+                            while let Expression::FieldAccess(target, _, _) = current {
+                                current = target;
+                            }
+
+                            if let Expression::Variable(v) = current {
+                                if let Some(entry) = self.env.get(&v.value) {
+                                    if entry.is_mutable {
+                                        return Err(format!(
+                                            "Pure Function Error: Argument '{}' is mutable. Pure functions only accept immutable values.",
+                                            v.value
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // D. Evaluate Arguments *in the current scope*
                     let mut arg_values = Vec::new();
@@ -318,19 +342,28 @@ impl Interpreter {
                             param.name,
                             super::values::Value {
                                 data: arg_values[i].clone(),
-                                is_mutable: true, // Args are local variables, so they are mutable
+                                is_mutable: if pure_kw.is_some() { false } else { true },
                             },
                         );
+                    }
+
+                    // H. Run the Body
+                    let old_mode = self.in_pure_mode;
+                    if pure_kw.is_some() {
+                        self.in_pure_mode = true;
+                        // Args checked above before move
                     }
 
                     // G. Context Switch!
                     self.env = fn_env;
 
-                    // H. Run the Body
-                    let result_sig = self.execute_block(body)?;
+                    let result_sig = self.execute_block(body);
 
                     // I. Restore the Old World
                     self.env = old_env;
+                    self.in_pure_mode = old_mode;
+
+                    let result_sig = result_sig?; // Propagate error now
 
                     // Return the result of the function
                     match result_sig {

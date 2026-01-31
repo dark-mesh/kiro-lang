@@ -1,20 +1,34 @@
 use crate::grammar::grammar;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub mod expression;
 pub mod statement;
 pub mod types;
 
+#[derive(Clone, Debug)]
+pub struct VarInfo {
+    pub is_mutable: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct FunctionInfo {
+    pub is_pure: bool,
+}
+
 pub struct Compiler {
-    pub known_vars: HashSet<String>,
+    pub known_vars: HashMap<String, VarInfo>,
     pub imported_modules: HashSet<String>,
+    pub functions: HashMap<String, FunctionInfo>,
+    pub in_pure_context: bool,
 }
 
 impl Compiler {
     pub fn new() -> Self {
         Self {
-            known_vars: HashSet::new(),
+            known_vars: HashMap::new(),
             imported_modules: HashSet::new(),
+            functions: HashMap::new(),
+            in_pure_context: false,
         }
     }
 
@@ -111,6 +125,15 @@ impl Compiler {
 
         let mut top_level = String::new();
         let mut body = String::new();
+
+        // 0. Pre-Scan Functions for Metadata (Purity Check)
+        for stmt in &program.statements {
+            if let grammar::Statement::FunctionDef { name, pure_kw, .. } = stmt {
+                let is_pure = pure_kw.is_some();
+                self.functions
+                    .insert(name.clone(), FunctionInfo { is_pure });
+            }
+        }
 
         for statement in program.statements {
             // Check if it should be hoisted

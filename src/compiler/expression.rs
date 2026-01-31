@@ -87,6 +87,9 @@ impl Compiler {
 
             // 6. Take -> .rx.recv().await
             Expression::Take(_, channel) => {
+                if self.in_pure_context {
+                    panic!("Pure Function Error: 'take' is forbidden.");
+                }
                 let ch = self.compile_expr(*channel);
                 format!("{}.rx.recv().await.unwrap()", ch)
             }
@@ -213,6 +216,32 @@ impl Compiler {
             }
             // 3. Normal Call -> await
             Expression::Call(func, _, args, _) => {
+                // Purity Check
+                if let Expression::Variable(v) = &*func {
+                    if let Some(info) = self.functions.get(&v.value) {
+                        if info.is_pure {
+                            // Check Args
+                            for arg in &args {
+                                let mut current = arg;
+                                while let Expression::FieldAccess(target, _, _) = current {
+                                    current = target;
+                                }
+                                if let Expression::Variable(arg_v) = current {
+                                    // Check if known mutable
+                                    if let Some(var_info) = self.known_vars.get(&arg_v.value) {
+                                        if var_info.is_mutable {
+                                            panic!(
+                                                "Compiler Error: Cannot pass mutable variable '{}' to pure function '{}'.",
+                                                arg_v.value, v.value
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let func_name = self.compile_expr(*func);
                 let arg_strs: Vec<String> = args
                     .iter()

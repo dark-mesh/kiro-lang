@@ -19,6 +19,8 @@ pub enum RuntimeVal {
         HashMap<String, RuntimeVal>,
         HashMap<String, crate::grammar::grammar::Statement>,
     ),
+    // Error: (type_name, description)
+    Error(String, String),
 }
 
 // Manual implementation to handle Pipe which cannot be compared
@@ -38,6 +40,7 @@ impl PartialEq for RuntimeVal {
             (RuntimeVal::List(l1), RuntimeVal::List(l2)) => l1 == l2,
             (RuntimeVal::Map(m1), RuntimeVal::Map(m2)) => m1 == m2,
             (RuntimeVal::Module(_m1, _f1), RuntimeVal::Module(_m2, _f2)) => false, // Modules identity is tough, assume false for now
+            (RuntimeVal::Error(n1, _), RuntimeVal::Error(n2, _)) => n1 == n2,
             _ => false,
         }
     }
@@ -76,6 +79,7 @@ impl fmt::Display for RuntimeVal {
             RuntimeVal::List(l) => write!(f, "<List len={}>", l.len()),
             RuntimeVal::Map(m) => write!(f, "<Map len={}>", m.len()),
             RuntimeVal::Module(_, _) => write!(f, "<Module>"),
+            RuntimeVal::Error(name, desc) => write!(f, "Error({}): {}", name, desc),
         }
     }
 }
