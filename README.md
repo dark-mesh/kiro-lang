@@ -58,8 +58,9 @@ Kiro uses a "sane default" approach to mutability.
 - `num`: 64-bit Floating point numbers (e.g., `3.14`, `42`).
 - `str`: Strings (e.g., `"Hello"`).
 - `bool`: Booleans (`true`, `false`).
-- `adr`: Addresses/Pointers.
-- `pipe`: Channels for asynchronous communication.
+- `void`: Represents the absence of a value.
+- `adr <type>`: Type-safe addresses/pointers.
+- `pipe <type>`: Typed channels for asynchronous communication.
 - **Strict Typed Collections**: `list <type>` and `map <key> <val>`.
 - **Structs**: Custom named types (e.g., `User`).
 
@@ -169,17 +170,32 @@ Kiro supports standard control flow signals within functions and loops:
 
 Kiro abstractly manages memory while giving you pointer-like behavior. References are thread-safe (`Arc<Mutex<T>>`).
 
+#### Typed Pointers & Lazy Initialization
+
+Pointers are declared with `adr <type>`. If initialized without a value, they are "lazy" (empty).
+
 ```kiro
 var x = 10
 var ptr = ref x
-print deref ptr // Returns 10
+deref ptr = 20 // Mutate 'x' via pointer
+print x // Returns 20
 
-// Mutation via Pointer
-deref ptr = 20
-print x // Returns 20 (it was changed via the reference!)
+var lazy_ptr = adr str // Uninitialized pointer
+lazy_ptr = ref "Now I exist"
 ```
 
-**Auto-Deref**: Struct fields can be accessed directly on references: `ptr.name` instead of `(deref ptr).name`.
+#### Opaque Pointers (`adr void`)
+
+Use `adr void` to store a raw memory address without type information. This is useful for passing handles or legacy pointers.
+
+```kiro
+var x = 10
+var raw = adr void
+raw = ref x // Address is extracted as a usize
+print raw   // Prints the raw address (e.g. 5829058176)
+```
+
+**Auto-Deref**: Struct fields can be accessed directly on typed references: `ptr.name` instead of `(deref ptr).name`.
 
 ### 7. Concurrency & Pipes
 
@@ -193,23 +209,39 @@ run worker(id)
 
 #### Pipes (Channels)
 
-Channels for safe communication between tasks.
+Channels for safe communication between tasks. Pipes are typed: `pipe <type>`.
+
+```kiro
+var p = pipe num // Create a channel for numbers
+give p 42
+var x = take p
+```
 
 - `give p val`: Send value.
 - `take p`: Receive value (awaits).
 - `close p`: Close the channel.
+- `pipe void`: A signal-only channel.
 
 ### 8. Functions
 
-Functions are declared with `fn`. Arguments must be typed.
+Functions are declared with `fn`. Arguments and return types are explicit.
 
 ```kiro
-fn add(a: num, b: num) {
-    print a + b
+fn add(a: num, b: num) -> num {
+    return a + b
+}
+
+fn do_nothing() -> void {
+    print "Working..."
+    return // Optional for void
 }
 
 add(10, 20)
+do_nothing()
 ```
+
+- **Void Functions**: If the return type is omitted, it defaults to `void`.
+- **Explicit Return**: Use `-> type` to specify the return value.
 
 > **Note**: A `pure` keyword exists (`pure fn`) for future strict-mode implementations (side-effect free functions).
 
