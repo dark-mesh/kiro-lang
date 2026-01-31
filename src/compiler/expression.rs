@@ -5,7 +5,19 @@ use crate::grammar::grammar::{self, Expression};
 impl Compiler {
     pub fn compile_expr(&self, expr: Expression) -> String {
         match expr {
-            Expression::Variable(v) => v.value,
+            Expression::Variable(v) => {
+                // Check if this is an error type (starts with uppercase)
+                if v.value
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                {
+                    // Assume it's an error type - generate Err(kiro_error_Name())
+                    return format!("Err(kiro_error_{}())", v.value);
+                }
+                v.value
+            }
 
             // 2. Compile Struct Init
             Expression::StructInit(name, _, fields, _) => {

@@ -71,7 +71,7 @@ Kiro uses a "sane default" approach to mutability.
 
 #### Operators & Expressions
 
-- **Concatenation**: Use `+` for strings (`"a" + "b"`).
+- **Concatenation**: Use `+` to concatenate strings. It supports concatenating strings with any other type (e.g., `"Result: " + true` or `10 + " items"`).
 - **Deep Equality**: `==` and `!=` work deeply for Structs, Lists, and Maps.
 - **Size**: Use `len` to get the length of strings and collections (`len my_list`).
 
@@ -262,11 +262,62 @@ fn main() {
 }
 ```
 
-**Strict Constraints:**
+- **Strict Constraints:**
 
 1. **No IO**: `print`, `give`, and `take` are forbidden inside `pure` functions.
 2. **Immutable Arguments**: You cannot pass a mutable variable (`var x`) to a pure function. Only literals or immutable variables are allowed.
 3. **No Side Effects**: Pure functions cannot mutate data outside their own local scope.
+
+### 9. Error Handling
+
+Kiro provides a structured error handling system integrated into its core control flow.
+
+#### Error Definitions
+
+Define custom, type-only errors with optional descriptions. Error names must start with a Capital letter.
+
+```kiro
+error NotFound = "File not found"
+error PermissionDenied = "Access denied"
+```
+
+#### Failable Functions (`!`)
+
+Functions that can return an error must be marked with the `!` suffix on their return type.
+
+```kiro
+fn maybe_fail(code: num) -> str! {
+    on (code == 1) {
+        return NotFound
+    }
+    return "Success!"
+}
+```
+
+- **Success**: Returns the value (automatically wrapped in `Ok`).
+- **Failure**: Returns the error type (automatically wrapped in `Err`).
+
+#### Handling Errors (`on` / `error`)
+
+Use the `on` statement to branch based on success or failure.
+
+```kiro
+var result = maybe_fail(1)
+
+on (result) {
+    // Smart Casting: 'result' is shadowed here as a 'str'
+    print "Success: " + result
+} error NotFound {
+    print "Error: File was not found."
+} error {
+    // Catch-all block
+    print "An unknown error occurred."
+}
+```
+
+- **Smart Casting**: Inside the success block of an `on` statement, failable variables are automatically unwrapped and shadowed by their successful value.
+- **Implicit Propagation**: If an `error` block doesn't explicitly return or handle the error, the error is implicitly re-thrown to the caller.
+- **Catch-all**: A bare `error { ... }` catches any unhandled error types.
 
 ---
 

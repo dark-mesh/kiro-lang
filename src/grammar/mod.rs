@@ -12,7 +12,7 @@ pub mod grammar {
     }
     #[derive(Debug, Clone)]
     pub struct VariableVal {
-        #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
+        #[rust_sitter::leaf(pattern = r"[a-zA-Z_][a-zA-Z0-9_]*", transform = |s| s.to_string())]
         pub value: String,
     }
 
@@ -220,6 +220,8 @@ pub mod grammar {
             #[rust_sitter::leaf(text = "->")]
             _arrow: Option<()>,
             return_type: Option<KiroType>,
+            #[rust_sitter::leaf(text = "!")]
+            can_error: Option<()>,
 
             body: Block,
         },

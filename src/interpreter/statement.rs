@@ -156,30 +156,32 @@ impl Interpreter {
                 let val = self.eval_expr(condition)?;
 
                 // Check if value is an Error
-                if let RuntimeVal::Error(ref err_name, _) = val {
+                if let RuntimeVal::Error(ref err_name, ref err_desc) = val {
                     // Try to match against error clause
                     if let Some(clause) = error_clause {
                         // If error_type is None, it's a catch-all
                         if clause.error_type.is_none()
                             || clause.error_type.as_ref() == Some(err_name)
                         {
-                            return self.execute_block(clause.body);
+                            let result = self.execute_block(clause.body)?;
+                            // If block returned normally with Void, implicitly return the error
+                            match result {
+                                StatementResult::Normal(RuntimeVal::Void) => {
+                                    return Ok(StatementResult::Return(RuntimeVal::Error(
+                                        err_name.clone(),
+                                        err_desc.clone(),
+                                    )));
+                                }
+                                other => return Ok(other),
+                            }
                         }
                     }
-                    // If no clause matched, propagate the error
-                    return Err(format!("Unhandled error: {}", err_name));
+                    // If no clause matched, return the error as-is (propagation)
+                    return Ok(StatementResult::Return(val));
                 }
 
                 // Standard truthy check for non-error values
-                let is_truthy = match &val {
-                    RuntimeVal::Float(f) => *f != 0.0,
-                    RuntimeVal::Bool(b) => *b,
-                    RuntimeVal::String(s) => !s.is_empty(),
-                    RuntimeVal::Void => false,
-                    _ => true,
-                };
-
-                if is_truthy {
+                if val.is_truthy() {
                     self.execute_block(body)
                 } else {
                     if let Some(clause) = else_clause {
@@ -194,7 +196,10 @@ impl Interpreter {
             } => {
                 // While condition evaluates to True (1)
                 loop {
-                    if self.eval_expr(condition.clone())?.as_float()? == 0.0 {
+                    // Re-evaluate condition each iteration
+                    let val = self.eval_expr(condition.clone())?;
+
+                    if !val.is_truthy() {
                         break;
                     }
                     let res = self.execute_block(body.clone())?;

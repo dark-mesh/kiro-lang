@@ -64,6 +64,16 @@ impl RuntimeVal {
             _ => Err("Type Error: Expected a number".to_string()),
         }
     }
+
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            RuntimeVal::Float(f) => *f != 0.0,
+            RuntimeVal::Bool(b) => *b,
+            RuntimeVal::String(s) => !s.is_empty(),
+            RuntimeVal::Void => false,
+            _ => true,
+        }
+    }
 }
 
 impl fmt::Display for RuntimeVal {

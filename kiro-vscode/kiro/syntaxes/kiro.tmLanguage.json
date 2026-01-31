@@ -48,7 +48,7 @@
       "patterns": [
         {
           "name": "keyword.control.kiro",
-          "match": "\\b(return|break|continue|on|off|loop|in|per|if|while|for)\\b"
+          "match": "\\b(return|break|continue|on|off|loop|in|per|if|while|for|error)\\b"
         },
         {
           "name": "storage.type.kiro",
@@ -63,6 +63,10 @@
           "match": "\\b(ref|deref|push|at)\\b"
         },
         {
+          "name": "keyword.operator.punctuation.kiro",
+          "match": "!"
+        },
+        {
           "name": "support.function.kiro",
           "match": "\\b(print|len)\\b"
         }
@@ -72,7 +76,7 @@
       "patterns": [
         {
           "name": "storage.type.kiro",
-          "match": "\\b(num|str|bool|adr|pipe|list|map)\\b"
+          "match": "\\b(num|str|bool|adr|pipe|list|map|void)\\b"
         }
       ]
     },

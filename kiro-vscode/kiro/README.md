@@ -1,65 +1,49 @@
-# kiro README
+<p align="center">
+  <img src="kiro-logo.png" width="300" alt="Kiro Logo">
+</p>
 
-This is the README for your extension "kiro". After writing up a brief description, we recommend including the following sections.
+# Kiro Language Support for VS Code
 
-## Features
+This is the official Visual Studio Code extension for **Kiro**, a modern experimental programming language.
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+## ✨ Features
 
-For example if there is an image subfolder under your extension project workspace:
+- **Syntax Highlighting**: Comprehensive coloring for Kiro's unique syntax, including:
+  - Keywords (`fn`, `var`, `struct`, `import`, `pure`, `run`, `error`)
+  - Control Flow (`if`, `loop`, `on/off`)
+  - Types (`num`, `str`, `bool`, `void`, `adr`, `pipe`)
+  - Operators (`ref`, `deref`, `!`, `push`, `at`)
+  - Comments and Strings
+- **Bracket Matching**: Automatic matching for `{ }`, `( )`, and `[ ]`.
+- **Comment Toggling**: Support for `//` line comments.
 
-\!\[feature X\]\(images/feature-x.png\)
+## 📦 Installation
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+This extension is currently part of the Kiro language repository. To use it locally:
 
-## Requirements
+1. Open the `kiro-vscode/kiro` folder in VS Code.
+2. Press `F5` to launch a new Extension Development Host window with Kiro support enabled.
+3. Open any `.kiro` file to see the syntax highlighting in action.
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## 🚀 Usage
 
-## Extension Settings
+Create a file ending in `.kiro` (e.g., `main.kiro`). The extension will automatically activate and provide syntax highlighting.
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+```kiro
+fn main() -> void {
+    print "Hello, Kiro!"
 
-For example:
+    var x = 10
+    on (x > 5) {
+        print "Greater than 5"
+    }
+}
+```
 
-This extension contributes the following settings:
+## 🔗 Kiro Language
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+To learn more about the Kiro language, visit the [main repository](https://github.com/Start-0/kiro-lang).
 
-## Known Issues
+## 📄 License
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+MIT

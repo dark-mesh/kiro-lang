@@ -93,16 +93,41 @@ impl Compiler {
                 error_clause,
                 ..
             } => {
-                let cond_str = self.compile_expr(condition);
+                let cond_str = self.compile_expr(condition.clone());
                 let body_str = self.compile_block(body);
 
                 // If there is an error clause, generate a match on Result
                 if let Some(clause) = error_clause {
-                    let clause_body = self.compile_block(clause.body);
+                    // Compile block
+                    let block_body = self.compile_block(clause.body.clone());
+
+                    // Implicit Error Return Logic:
+                    // If we are in a failable function, we propagate the error implicitly if not returned.
+                    // If we are in a non-failable function (like main), we cannot propagate (return Err),
+                    // so we assume the error is handled and fall through (or user explicitly returns/panics).
+                    let clause_body = if self.in_failable_fn {
+                        format!("{} return Err(__kiro_err);", block_body)
+                    } else {
+                        block_body // Fall through (Swallow error as handled)
+                    };
+
+                    let shadowing = if let grammar::Expression::Variable(v) = &condition {
+                        format!("let {} = __kiro_val;", v.value)
+                    } else {
+                        String::new()
+                    };
+
                     let err_branch = if let Some(err_type) = clause.error_type {
+                        // For unhandled types (else branch of the error check)
+                        let propagation = if self.in_failable_fn {
+                            "return Err(__kiro_err);"
+                        } else {
+                            "panic!(\"Unhandled error: {}\", __kiro_err);"
+                        };
+
                         format!(
-                            "if __kiro_err.to_string().contains(\"{}\") {} else {{ panic!(\"Unhandled error: {{}}\", __kiro_err); }}",
-                            err_type, clause_body
+                            "if __kiro_err.to_string().contains(\"{}\") {{ {} }} else {{ {} }}",
+                            err_type, clause_body, propagation
                         )
                     } else {
                         // Catch-all
@@ -110,8 +135,8 @@ impl Compiler {
                     };
 
                     format!(
-                        "match {} {{ Ok(__kiro_val) => {} Err(__kiro_err) => {{ {} }} }}",
-                        cond_str, body_str, err_branch
+                        "match {} {{ Ok(__kiro_val) => {{ {} {} }} Err(__kiro_err) => {{ {} }} }}",
+                        cond_str, shadowing, body_str, err_branch
                     )
                 } else {
                     // Standard if/else
@@ -119,7 +144,7 @@ impl Compiler {
                         Some(clause) => format!("else {}", self.compile_block(clause.body)),
                         None => String::new(),
                     };
-                    format!("if ({}) != 0.0 {} {}", cond_str, body_str, else_str)
+                    format!("if ({}).kiro_truthy() {} {}", cond_str, body_str, else_str)
                 }
             }
             Statement::LoopOn {
@@ -180,11 +205,17 @@ impl Compiler {
                 return_type,
                 body,
                 pure_kw,
+                can_error,
                 ..
             } => {
                 let is_pure = pure_kw.is_some();
-                self.functions
-                    .insert(name.clone(), super::FunctionInfo { is_pure });
+                self.functions.insert(
+                    name.clone(),
+                    super::FunctionInfo {
+                        is_pure,
+                        can_error: can_error.is_some(),
+                    },
+                );
 
                 let old_context = self.in_pure_context;
                 if is_pure {
@@ -199,11 +230,18 @@ impl Compiler {
                     .map(|p| format!("{}: {}", p.name, compile_type(&p.command_type)))
                     .collect();
 
+                let can_error = can_error.is_some();
+                let old_in_failable = self.in_failable_fn;
+                if can_error {
+                    self.in_failable_fn = true;
+                }
+
                 let body_str = self.compile_block(body);
 
                 self.in_pure_context = old_context;
+                self.in_failable_fn = old_in_failable;
 
-                let ret_type = if let Some(rt) = return_type {
+                let ret_def = if let Some(rt) = return_type {
                     if let crate::grammar::grammar::KiroType::Void = rt {
                         "()".to_string()
                     } else {
@@ -213,19 +251,22 @@ impl Compiler {
                     "()".to_string()
                 };
 
-                // We append "; Default::default()" to try to satisfy return types if block is void-ish
-                // But generally, the block should return the value.
-                // For proper transpiring, we rely on Rust's implicit return.
-                // However, adding a fallback for void/unit might be needed.
-                // For now, let's trust the block returns the right thing or user wrote 'return'.
-                // EXCEPT: Kiro semantics might allow implicit return of last expr.
-                // Rust does too. compile_block returns a block "{ stmts }"
+                let (ret_type, final_body) = if can_error {
+                    // Wrap body in Ok(...) to satisfy Result return type
+                    (
+                        format!("anyhow::Result<{}>", ret_def),
+                        format!("{{ let __kiro_res = {}; Ok(__kiro_res) }}", body_str),
+                    )
+                } else {
+                    (ret_def, body_str)
+                };
+
                 format!(
                     "pub async fn {}({}) -> {} {}",
                     name,
                     param_strs.join(", "),
                     ret_type,
-                    body_str
+                    final_body
                 )
             }
 
@@ -253,9 +294,19 @@ impl Compiler {
             Statement::Return(_, expr) => {
                 if let Some(e) = expr {
                     let val = self.compile_expr(e);
-                    format!("return {};", val)
+                    if self.in_failable_fn && !val.starts_with("Err(") {
+                        // In failable context, wrap non-error returns in Ok(...)
+                        // Unless it's already an Err(...) creation
+                        format!("return Ok({});", val)
+                    } else {
+                        format!("return {};", val)
+                    }
                 } else {
-                    "return;".to_string()
+                    if self.in_failable_fn {
+                        "return Ok(());".to_string()
+                    } else {
+                        "return;".to_string()
+                    }
                 }
             }
             // 4. Break -> break

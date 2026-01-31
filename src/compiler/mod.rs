@@ -13,6 +13,7 @@ pub struct VarInfo {
 #[derive(Clone, Debug)]
 pub struct FunctionInfo {
     pub is_pure: bool,
+    pub can_error: bool,
 }
 
 pub struct Compiler {
@@ -20,6 +21,7 @@ pub struct Compiler {
     pub imported_modules: HashSet<String>,
     pub functions: HashMap<String, FunctionInfo>,
     pub in_pure_context: bool,
+    pub in_failable_fn: bool,
 }
 
 impl Compiler {
@@ -29,6 +31,7 @@ impl Compiler {
             imported_modules: HashSet::new(),
             functions: HashMap::new(),
             in_pure_context: false,
+            in_failable_fn: false,
         }
     }
 
@@ -116,6 +119,12 @@ impl Compiler {
                         *self = rhs.as_ref().map(|a| std::sync::Arc::as_ptr(a) as usize).unwrap_or(0);
                     }
                 }
+
+                // --- KIRO TRUTHY ---
+                pub trait KiroTruthy { fn kiro_truthy(&self) -> bool; }
+                impl KiroTruthy for bool { fn kiro_truthy(&self) -> bool { *self } }
+                impl KiroTruthy for f64 { fn kiro_truthy(&self) -> bool { *self != 0.0 } }
+                impl<T, E> KiroTruthy for Result<T, E> { fn kiro_truthy(&self) -> bool { self.is_ok() } }
                 "#,
             );
         } else {
@@ -128,10 +137,17 @@ impl Compiler {
 
         // 0. Pre-Scan Functions for Metadata (Purity Check)
         for stmt in &program.statements {
-            if let grammar::Statement::FunctionDef { name, pure_kw, .. } = stmt {
+            if let grammar::Statement::FunctionDef {
+                name,
+                pure_kw,
+                can_error,
+                ..
+            } = stmt
+            {
                 let is_pure = pure_kw.is_some();
+                let can_error = can_error.is_some();
                 self.functions
-                    .insert(name.clone(), FunctionInfo { is_pure });
+                    .insert(name.clone(), FunctionInfo { is_pure, can_error });
             }
         }
 

@@ -46,8 +46,13 @@ impl Interpreter {
             }
 
             Expression::Variable(v) => {
+                // Check if this is an error type
+                if let Some(desc) = self.error_types.get(&v.value) {
+                    return Ok(RuntimeVal::Error(v.value.clone(), desc.clone()));
+                }
+                // Otherwise look up as regular variable
                 self.env
-                    .get(&v.value) // Use .value here
+                    .get(&v.value)
                     .map(|val| val.data.clone())
                     .ok_or_else(|| format!("ERROR: Variable '{}' not found.", v.value))
             }
@@ -169,9 +174,8 @@ impl Interpreter {
                 let r = self.eval_expr(*rhs)?;
                 match (l, r) {
                     (RuntimeVal::Float(a), RuntimeVal::Float(b)) => Ok(RuntimeVal::Float(a + b)),
-                    (RuntimeVal::String(a), RuntimeVal::String(b)) => {
-                        Ok(RuntimeVal::String(format!("{}{}", a, b)))
-                    }
+                    (RuntimeVal::String(a), b) => Ok(RuntimeVal::String(format!("{}{}", a, b))),
+                    (a, RuntimeVal::String(b)) => Ok(RuntimeVal::String(format!("{}{}", a, b))),
                     _ => Err("Runtime Error: Can only ADD numbers or strings".to_string()),
                 }
             }
@@ -206,53 +210,30 @@ impl Interpreter {
                 }
             }
             Expression::Gt(lhs, _, rhs) => {
-                let val = if self.eval_expr(*lhs)? > self.eval_expr(*rhs)? {
-                    1.0
-                } else {
-                    0.0
-                };
-                Ok(RuntimeVal::Float(val))
+                let val = self.eval_expr(*lhs)? > self.eval_expr(*rhs)?;
+                Ok(RuntimeVal::Bool(val))
             }
             Expression::Lt(lhs, _, rhs) => {
-                let val = if self.eval_expr(*lhs)? < self.eval_expr(*rhs)? {
-                    1.0
-                } else {
-                    0.0
-                };
-                Ok(RuntimeVal::Float(val))
+                let val = self.eval_expr(*lhs)? < self.eval_expr(*rhs)?;
+                Ok(RuntimeVal::Bool(val))
             }
             Expression::Eq(lhs, _, rhs) => {
-                let val = if self.eval_expr(*lhs)? == self.eval_expr(*rhs)? {
-                    1.0
-                } else {
-                    0.0
-                };
-                Ok(RuntimeVal::Float(val))
+                let val = self.eval_expr(*lhs)? == self.eval_expr(*rhs)?;
+                Ok(RuntimeVal::Bool(val))
             }
             Expression::Neq(lhs, _, rhs) => {
-                let val = if self.eval_expr(*lhs)? != self.eval_expr(*rhs)? {
-                    1.0
-                } else {
-                    0.0
-                };
-                Ok(RuntimeVal::Float(val))
+                let val = self.eval_expr(*lhs)? != self.eval_expr(*rhs)?;
+                Ok(RuntimeVal::Bool(val))
             }
             Expression::Geq(lhs, _, rhs) => {
-                let val = if self.eval_expr(*lhs)? >= self.eval_expr(*rhs)? {
-                    1.0
-                } else {
-                    0.0
-                };
-                Ok(RuntimeVal::Float(val))
+                let val = self.eval_expr(*lhs)? >= self.eval_expr(*rhs)?;
+                Ok(RuntimeVal::Bool(val))
             }
             Expression::Leq(lhs, _, rhs) => {
-                let val = if self.eval_expr(*lhs)? <= self.eval_expr(*rhs)? {
-                    1.0
-                } else {
-                    0.0
-                };
-                Ok(RuntimeVal::Float(val))
+                let val = self.eval_expr(*lhs)? <= self.eval_expr(*rhs)?;
+                Ok(RuntimeVal::Bool(val))
             }
+
             // 1. Handle Standard Calls
             Expression::Call(func_var, _, args, _) => {
                 // A. Resolve the function
