@@ -42,7 +42,7 @@ fn main() -> void {
 
 ## 🔗 Kiro Language
 
-To learn more about the Kiro language, visit the [main repository](https://github.com/Start-0/kiro-lang).
+To learn more about the Kiro language, visit the [main repository](https://github.com/dark-mesh/kiro-lang).
 
 ## 📄 License
 
