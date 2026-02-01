@@ -1,0 +1,10 @@
+// Kiro Standard Library: Networking
+// Uses reqwest for async HTTP requests
+
+error NetworkError = "Network request failed"
+error InvalidUrl = "Invalid URL"
+
+rust fn get(url: str) -> str!
+rust fn post(url: str, body: str) -> str!
+rust fn status(url: str) -> num!
+rust fn body(response: str) -> str

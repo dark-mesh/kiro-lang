@@ -1,0 +1,8 @@
+// Kiro Standard Library: Environment
+// Uses std::env for environment variable access
+
+error EnvNotFound = "Environment variable not found"
+
+rust fn get(key: str) -> str!
+rust fn set(key: str, value: str) -> void
+rust fn args() -> list str

@@ -90,49 +90,66 @@ impl Compiler {
                 condition,
                 body,
                 else_clause,
-                error_clause,
+                error_clauses,
                 ..
             } => {
                 let cond_str = self.compile_expr(condition.clone());
                 let body_str = self.compile_block(body);
 
-                // If there is an error clause, generate a match on Result
-                if let Some(clause) = error_clause {
-                    // Compile block
-                    let block_body = self.compile_block(clause.body.clone());
+                // Helper to flatten ErrorClauseList into Vec<&ErrorClause>
+                fn flatten_clauses(list: &grammar::ErrorClauseList) -> Vec<&grammar::ErrorClause> {
+                    let mut result = vec![&list.first];
+                    if let Some(ref rest) = list.rest {
+                        result.extend(flatten_clauses(rest));
+                    }
+                    result
+                }
 
-                    // Implicit Error Return Logic:
-                    // If we are in a failable function, we propagate the error implicitly if not returned.
-                    // If we are in a non-failable function (like main), we cannot propagate (return Err),
-                    // so we assume the error is handled and fall through (or user explicitly returns/panics).
-                    let clause_body = if self.in_failable_fn {
-                        format!("{} return Err(__kiro_err);", block_body)
-                    } else {
-                        block_body // Fall through (Swallow error as handled)
-                    };
-
+                // If there are error clauses, generate a match on Result
+                if let Some(ref error_list) = error_clauses {
+                    let clauses = flatten_clauses(error_list);
                     let shadowing = if let grammar::Expression::Variable(v) = &condition {
                         format!("let {} = __kiro_val;", v.value)
                     } else {
                         String::new()
                     };
 
-                    let err_branch = if let Some(err_type) = clause.error_type {
-                        // For unhandled types (else branch of the error check)
-                        let propagation = if self.in_failable_fn {
-                            "return Err(__kiro_err);"
+                    // Build chained if/else if for multiple error handlers
+                    let mut err_branches = Vec::new();
+                    let mut has_catch_all = false;
+
+                    for clause in clauses.iter() {
+                        let block_body = self.compile_block(clause.body.clone());
+                        let clause_body = if self.in_failable_fn {
+                            format!("{} return Err(__kiro_err);", block_body)
                         } else {
-                            "panic!(\"Unhandled error: {}\", __kiro_err);"
+                            block_body
                         };
 
-                        format!(
-                            "if __kiro_err.to_string().contains(\"{}\") {{ {} }} else {{ {} }}",
-                            err_type, clause_body, propagation
-                        )
-                    } else {
-                        // Catch-all
-                        clause_body
-                    };
+                        if let Some(ref err_type) = clause.error_type {
+                            err_branches.push(format!(
+                                "if __kiro_err.to_string().contains(\"{}\") {{ {} }}",
+                                err_type, clause_body
+                            ));
+                        } else {
+                            // Catch-all (must be last)
+                            has_catch_all = true;
+                            err_branches.push(format!("{{ {} }}", clause_body));
+                        }
+                    }
+
+                    // If no catch-all, add propagation as final else
+                    if !has_catch_all {
+                        let propagation = if self.in_failable_fn {
+                            "{ return Err(__kiro_err); }".to_string()
+                        } else {
+                            "{ panic!(\"Unhandled error: {}\", __kiro_err); }".to_string()
+                        };
+                        err_branches.push(propagation);
+                    }
+
+                    // Join with "else"
+                    let err_branch = err_branches.join(" else ");
 
                     format!(
                         "match {} {{ Ok(__kiro_val) => {{ {} {} }} Err(__kiro_err) => {{ {} }} }}",
@@ -312,12 +329,12 @@ impl Compiler {
 
                 let final_body = if can_error {
                     format!(
-                        "{{ match header::{}({}) {{ Ok(v) => Ok(v.try_into()?), Err(e) => Err(anyhow::anyhow!(e.name).context(e.name)) }} }}",
+                        "{{ match header::{}({}).await {{ Ok(v) => Ok(v.try_into()?), Err(e) => Err(anyhow::anyhow!(e.name.clone()).context(e.name)) }} }}",
                         name, args_vec
                     )
                 } else {
                     format!(
-                        "{{ header::{}({}).unwrap().try_into().unwrap() }}",
+                        "{{ header::{}({}).await.unwrap().try_into().unwrap() }}",
                         name, args_vec
                     )
                 };

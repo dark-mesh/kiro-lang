@@ -145,3 +145,22 @@ impl TryFrom<RuntimeVal> for () {
         }
     }
 }
+
+impl TryFrom<RuntimeVal> for Vec<String> {
+    type Error = KiroError;
+    fn try_from(val: RuntimeVal) -> Result<Self, Self::Error> {
+        match val {
+            RuntimeVal::List(items) => {
+                let mut result = Vec::new();
+                for item in items {
+                    match item {
+                        RuntimeVal::Str(s) => result.push(s),
+                        _ => return Err(KiroError::new("TypeError")),
+                    }
+                }
+                Ok(result)
+            }
+            _ => Err(KiroError::new("TypeError")),
+        }
+    }
+}

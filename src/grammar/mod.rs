@@ -162,10 +162,10 @@ pub mod grammar {
             #[rust_sitter::leaf(text = ")")]
             _r: (),
             body: Block,
-            // The 'off' part is optional (Option<Box<...>>)
+            // The 'off' part is optional
             else_clause: Option<OffClause>,
-            // Single error handler (for now, to avoid grammar conflict)
-            error_clause: Option<ErrorClause>,
+            // Multiple error handlers
+            error_clauses: Option<ErrorClauseList>,
         },
         LoopOn {
             #[rust_sitter::leaf(text = "loop")]
@@ -234,7 +234,7 @@ pub mod grammar {
 
             #[rust_sitter::leaf(text = "fn")]
             _fn: (),
- 
+
             #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
             name: String,
 
@@ -496,6 +496,7 @@ pub mod grammar {
         pub value: StringVal,
     }
     #[derive(Debug, Clone)]
+    #[rust_sitter::prec_right(2)]
     pub struct ErrorClause {
         #[rust_sitter::leaf(text = "error")]
         _error: (),
@@ -503,6 +504,14 @@ pub mod grammar {
         #[rust_sitter::leaf(pattern = r"[A-Z][a-zA-Z0-9]*", transform = |s| s.to_string())]
         pub error_type: Option<String>,
         pub body: Block,
+    }
+    // Recursive linked-list pattern for multiple error clauses
+    #[derive(Debug, Clone)]
+    #[rust_sitter::prec_right(2)]
+    pub struct ErrorClauseList {
+        pub first: ErrorClause,
+        // Recursive: rest of error clauses (Box to break recursion)
+        pub rest: Option<Box<ErrorClauseList>>,
     }
     #[derive(Debug, Clone)]
     pub struct StepClause {

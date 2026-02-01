@@ -1,0 +1,12 @@
+// Kiro Standard Library: File System
+// Uses tokio::fs for async file operations
+
+error NotFound = "File or directory not found"
+error PermissionDenied = "Permission denied"
+error IoError = "I/O error"
+
+rust fn read(path: str) -> str!
+rust fn write(path: str, content: str) -> void!
+rust fn exists(path: str) -> bool
+rust fn remove(path: str) -> void!
+rust fn list(path: str) -> list str!

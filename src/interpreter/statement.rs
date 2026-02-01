@@ -150,29 +150,41 @@ impl Interpreter {
                 condition,
                 body,
                 else_clause,
-                error_clause,
+                error_clauses,
                 ..
             } => {
                 let val = self.eval_expr(condition)?;
 
+                // Helper to flatten ErrorClauseList into Vec<&grammar::ErrorClause>
+                fn flatten_clauses(list: &grammar::ErrorClauseList) -> Vec<&grammar::ErrorClause> {
+                    let mut result = vec![&list.first];
+                    if let Some(ref rest) = list.rest {
+                        result.extend(flatten_clauses(rest));
+                    }
+                    result
+                }
+
                 // Check if value is an Error
                 if let RuntimeVal::Error(ref err_name, ref err_desc) = val {
-                    // Try to match against error clause
-                    if let Some(clause) = error_clause {
-                        // If error_type is None, it's a catch-all
-                        if clause.error_type.is_none()
-                            || clause.error_type.as_ref() == Some(err_name)
-                        {
-                            let result = self.execute_block(clause.body)?;
-                            // If block returned normally with Void, implicitly return the error
-                            match result {
-                                StatementResult::Normal(RuntimeVal::Void) => {
-                                    return Ok(StatementResult::Return(RuntimeVal::Error(
-                                        err_name.clone(),
-                                        err_desc.clone(),
-                                    )));
+                    // Try to match against error clauses in order
+                    if let Some(ref error_list) = error_clauses {
+                        let clauses = flatten_clauses(error_list);
+                        for clause in clauses.iter() {
+                            // If error_type is None, it's a catch-all
+                            let matches = clause.error_type.is_none()
+                                || clause.error_type.as_ref() == Some(err_name);
+                            if matches {
+                                let result = self.execute_block(clause.body.clone())?;
+                                // If block returned normally with Void, implicitly return the error
+                                match result {
+                                    StatementResult::Normal(RuntimeVal::Void) => {
+                                        return Ok(StatementResult::Return(RuntimeVal::Error(
+                                            err_name.clone(),
+                                            err_desc.clone(),
+                                        )));
+                                    }
+                                    other => return Ok(other),
                                 }
-                                other => return Ok(other),
                             }
                         }
                     }
@@ -359,7 +371,15 @@ impl Interpreter {
             }
             // 7. Import Logic
             Statement::Import { module_name, .. } => {
-                let filename = format!("{}.kiro", module_name);
+                // Resolve module path:
+                // 1. If starts with "std_", look in src/kiro_std/{module_name}/std_{module_name}.kiro
+                // 2. Otherwise, look in current directory as {name}.kiro
+                let filename = if module_name.starts_with("std_") {
+                    let module_suffix = &module_name[4..]; // Remove "std_" prefix
+                    format!("src/kiro_std/{}/{}.kiro", module_suffix, module_name)
+                } else {
+                    format!("{}.kiro", module_name)
+                };
                 println!("📦 Importing {}...", filename);
 
                 // A. Read the file

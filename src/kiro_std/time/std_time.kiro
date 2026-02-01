@@ -1,0 +1,6 @@
+// Kiro Standard Library: Time
+// Uses tokio::time for async sleep, std::time for timestamps
+
+rust fn now() -> num
+rust fn sleep(ms: num) -> void
+rust fn monotonic() -> num
