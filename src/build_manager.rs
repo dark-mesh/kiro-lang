@@ -78,6 +78,7 @@ impl BuildManager {
             {}
             {}
             anyhow = "1"
+            kiro_runtime = {{ path = "../kiro_runtime" }}
             "#,
             tokio_dep, async_channel_dep
         );

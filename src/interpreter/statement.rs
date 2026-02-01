@@ -323,6 +323,18 @@ impl Interpreter {
                 }
                 Ok(StatementResult::Normal(RuntimeVal::Void))
             }
+            // Rust-backed function declaration (register for lookup)
+            stmt @ Statement::RustFnDecl { .. } => {
+                if let Statement::RustFnDecl { name, .. } = &stmt {
+                    let func_name = name.clone();
+                    self.functions.insert(func_name.clone(), stmt);
+                    println!(
+                        "✨ Registered Rust Function: {} (compile to run)",
+                        func_name
+                    );
+                }
+                Ok(StatementResult::Normal(RuntimeVal::Void))
+            }
             // 1. Give (Sync Send)
             Statement::Give(_, channel_expr, value_expr) => {
                 if self.in_pure_mode {

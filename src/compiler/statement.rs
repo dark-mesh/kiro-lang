@@ -222,9 +222,6 @@ impl Compiler {
                     self.in_pure_context = true;
                 }
 
-                // In Kiro, functions are async by default (for 'run')
-                // We ignore 'pure' in transpilation (it's a safety check, not a syntax change)
-
                 let param_strs: Vec<String> = params
                     .iter()
                     .map(|p| format!("{}: {}", p.name, compile_type(&p.command_type)))
@@ -252,13 +249,83 @@ impl Compiler {
                 };
 
                 let (ret_type, final_body) = if can_error {
-                    // Wrap body in Ok(...) to satisfy Result return type
                     (
                         format!("anyhow::Result<{}>", ret_def),
                         format!("{{ let __kiro_res = {}; Ok(__kiro_res) }}", body_str),
                     )
                 } else {
                     (ret_def, body_str)
+                };
+
+                format!(
+                    "pub async fn {}({}) -> {} {}",
+                    name,
+                    param_strs.join(", "),
+                    ret_type,
+                    final_body
+                )
+            }
+
+            // Rust-backed function (external glue)
+            Statement::RustFnDecl {
+                name,
+                params,
+                return_type,
+                can_error,
+                ..
+            } => {
+                self.functions.insert(
+                    name.clone(),
+                    super::FunctionInfo {
+                        is_pure: false,
+                        can_error: can_error.is_some(),
+                    },
+                );
+
+                let param_strs: Vec<String> = params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, compile_type(&p.command_type)))
+                    .collect();
+
+                let can_error = can_error.is_some();
+
+                let ret_def = if let crate::grammar::grammar::KiroType::Void = return_type {
+                    "()".to_string()
+                } else {
+                    compile_type(&return_type)
+                };
+
+                // Generate call to header glue
+                let arg_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                let args_vec = if arg_names.is_empty() {
+                    "vec![]".to_string()
+                } else {
+                    format!(
+                        "vec![{}]",
+                        arg_names
+                            .iter()
+                            .map(|a| format!("kiro_runtime::RuntimeVal::from({}.clone())", a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+
+                let final_body = if can_error {
+                    format!(
+                        "{{ match header::{}({}) {{ Ok(v) => Ok(v.try_into()?), Err(e) => Err(anyhow::anyhow!(e.name).context(e.name)) }} }}",
+                        name, args_vec
+                    )
+                } else {
+                    format!(
+                        "{{ header::{}({}).unwrap().try_into().unwrap() }}",
+                        name, args_vec
+                    )
+                };
+
+                let ret_type = if can_error {
+                    format!("anyhow::Result<{}>", ret_def)
+                } else {
+                    ret_def
                 };
 
                 format!(

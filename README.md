@@ -14,6 +14,7 @@
 - **Expressive Loops**: Powerful `loop` constructs with built-in filtering (`on`) and stepping (`per`).
 - **Pointers Made Easy**: Simple `ref` and `deref` syntax that compiles to safe Rust concurrency primitives (`Arc<Mutex>`).
 - **Async First**: Built-in `run` keyword to easily spawn asynchronous tasks.
+- **Host Modules (Rust FFI)**: Powerful, type-safe access to the Rust ecosystem via `rust fn` and a shared runtime contract.
 - **Transpiled to Rust**: Code is compiled to robust Rust code, benefiting from Rust's ecosystem and performance.
 
 ---
@@ -318,6 +319,44 @@ on (result) {
 - **Smart Casting**: Inside the success block of an `on` statement, failable variables are automatically unwrapped and shadowed by their successful value.
 - **Implicit Propagation**: If an `error` block doesn't explicitly return or handle the error, the error is implicitly re-thrown to the caller.
 - **Catch-all**: A bare `error { ... }` catches any unhandled error types.
+
+### 10. Host Modules (Rust FFI)
+
+Kiro provides zero-friction access to the Rust ecosystem. You can call arbitrary Rust code without introducing unsafe or complex FFI signatures in your `.kiro` files.
+
+#### 1. Rust Function Declaration
+
+Declare external functions using the `rust` keyword. These functions are implemented in Rust but called like any other Kiro function.
+
+```kiro
+error NotFound = "File not found"
+
+// Explicit return types are required for rust fn
+rust fn read_file(path: str) -> str!
+```
+
+#### 2. Rust Glue Layer (`header.rs`)
+
+The logic lives in a centralized Rust "glue" file. Kiro scripts and the Rust host communicate via a shared runtime contract.
+
+- **Glue implementation**: Use the `kiro_runtime` crate to convert types between Kiro and Rust.
+- **Centralized Layer**: All host functions are consolidated in a single, auditable `header.rs` file.
+
+```rust
+// Example Glue Implementation
+use kiro_runtime::{RuntimeVal, KiroError};
+
+pub fn read_file(args: Vec<RuntimeVal>) -> Result<RuntimeVal, KiroError> {
+    let path = args[0].as_str()?; // Explicit conversion
+    match std::fs::read_to_string(path) {
+        Ok(c) => Ok(RuntimeVal::from(c)),
+        Err(_) => Err(KiroError::new("NotFound")),
+    }
+}
+```
+
+- **Interpreter Behavior**: The interpreter does not execute Rust glue. Calling a `rust fn` in interpretation mode will return a specific "Compile to Run" error.
+- **Compiler parity**: Results from Rust are strictly type-checked and integrated into Kiro's error handling (`on/error`).
 
 ---
 

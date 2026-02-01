@@ -223,7 +223,36 @@ pub mod grammar {
             #[rust_sitter::leaf(text = "!")]
             can_error: Option<()>,
 
-            body: Block,
+            body: Block, // Required body for normal functions
+        },
+        // Rust-backed function declaration (no body)
+        // Arrow and return type are REQUIRED to avoid grammar ambiguity
+        // Use `rust fn foo() -> void` for functions with no return
+        RustFnDecl {
+            #[rust_sitter::leaf(text = "rust")]
+            _rust_kw: (),
+
+            #[rust_sitter::leaf(text = "fn")]
+            _fn: (),
+ 
+            #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
+            name: String,
+
+            #[rust_sitter::leaf(text = "(")]
+            _l: (),
+            #[rust_sitter::delimited(
+                #[rust_sitter::leaf(text = ",")] ()
+            )]
+            params: Vec<FuncParam>,
+            #[rust_sitter::leaf(text = ")")]
+            _r: (),
+
+            #[rust_sitter::leaf(text = "->")]
+            _arrow: (), // REQUIRED
+            return_type: KiroType, // REQUIRED
+            #[rust_sitter::leaf(text = "!")]
+            can_error: Option<()>,
+            // No body - this is an external function
         },
         // 1. Give: give <channel> <value>
         Give(

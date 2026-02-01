@@ -56,7 +56,7 @@
         },
         {
           "name": "keyword.other.kiro",
-          "match": "\\b(pure|run|give|take|close)\\b"
+          "match": "\\b(pure|run|give|take|close|rust)\\b"
         },
         {
           "name": "keyword.operator.kiro",

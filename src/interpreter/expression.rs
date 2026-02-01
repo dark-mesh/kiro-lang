@@ -355,6 +355,12 @@ impl Interpreter {
                                 .to_string())
                         }
                     }
+                } else if let Statement::RustFnDecl { .. } = func_stmt {
+                    // Rust-backed function cannot be executed in interpreter
+                    Err(format!(
+                        "Rust Function Error: '{}' is a Rust-backed function and cannot be executed in interpreter mode. Compile to run.",
+                        func_debug_name
+                    ))
                 } else {
                     Err(format!("'{}' is not a function.", func_debug_name))
                 }

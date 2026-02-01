@@ -41,6 +41,8 @@ impl Compiler {
         output.push_str("use async_channel;\n");
 
         if is_main {
+            // Import header module for rust fn glue
+            output.push_str("mod header;\n");
             // ONLY DEFINED IN MAIN (Shared Runtime)
             // We make everything 'pub' so submodules can use them via 'use crate::*;'
             output.push_str(
