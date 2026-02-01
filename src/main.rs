@@ -7,45 +7,193 @@ use crate::build_manager::BuildManager;
 
 use std::fs;
 
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+use std::process::Command;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Default file argument (if no subcommand is used)
+    file: Option<String>,
+
+    /// Skip interpreter step
+    #[arg(long)]
+    no_interpret: bool,
+
+    /// Skip execution after build
+    #[arg(long)]
+    no_run: bool,
+
+    /// Output generated Rust code to stdout
+    #[arg(long)]
+    emit_rust: bool,
+
+    /// Show compiler output
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Parse, Compile, and Execute (Default)
+    Run {
+        file: String,
+        #[arg(long)]
+        no_interpret: bool,
+        #[arg(long)]
+        no_run: bool,
+        #[arg(long)]
+        emit_rust: bool,
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Interpret ONLY (No Compilation, No Host Modules)
+    Check { file: String },
+    /// Transpile and Build ONLY (No Execution)
+    Build {
+        file: String,
+        #[arg(long)]
+        emit_rust: bool,
+        #[arg(short, long)]
+        verbose: bool,
+    },
+}
+
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Some(Commands::Run {
+            file,
+            no_interpret,
+            no_run,
+            emit_rust,
+            verbose,
+        }) => {
+            if !execute_pipeline(&file, !*no_interpret, !*no_run, *emit_rust, *verbose) {
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Check { file }) => {
+            if !run_interpreter(&file) {
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Build {
+            file,
+            emit_rust,
+            verbose,
+        }) => {
+            if run_compiler(&file, *emit_rust, *verbose).is_err() {
+                std::process::exit(1);
+            }
+        }
+        None => {
+            if let Some(file) = &cli.file {
+                // Default behavior: Interpret -> Compile -> Run
+                if !execute_pipeline(
+                    file,
+                    !cli.no_interpret,
+                    !cli.no_run,
+                    cli.emit_rust,
+                    cli.verbose,
+                ) {
+                    std::process::exit(1);
+                }
+            } else {
+                <Cli as clap::CommandFactory>::command()
+                    .print_help()
+                    .unwrap();
+            }
+        }
+    }
+}
+
+// Returns true if success
+fn execute_pipeline(
+    file: &str,
+    do_interpret: bool,
+    do_run: bool,
+    emit_rust: bool,
+    verbose: bool,
+) -> bool {
     println!("🚀 Kiro Build System v0.2");
 
-    // 1. Interpret Main (triggers interpreter recursive imports)
-    let args: Vec<String> = std::env::args().collect();
-    let filename = if args.len() > 1 {
-        &args[1]
-    } else {
-        "main.kiro"
-    };
-
-    // Check existence
-    if !std::path::Path::new(filename).exists() {
-        eprintln!("❌ Error: '{}' not found.", filename);
-        return;
+    if do_interpret {
+        println!("🤖 --- INTERPRETER ---");
+        if !run_interpreter(file) {
+            return false;
+        }
     }
 
-    let source = fs::read_to_string(filename).unwrap();
+    if verbose {
+        println!("🔨 --- COMPILING ---");
+    } else {
+        println!("🔨 --- COMPILING --- (Output hidden, use --verbose to show)");
+    }
+
+    match run_compiler(file, emit_rust, verbose) {
+        Ok(exe_path) => {
+            if do_run {
+                println!("🚀 --- RUNNING ---");
+                if let Err(e) = execute_binary(exe_path) {
+                    eprintln!("Execution Error: {}", e);
+                    return false;
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Compiler Error: {}", e);
+            return false;
+        }
+    }
+
+    true
+}
+
+fn run_interpreter(filename: &str) -> bool {
+    if !std::path::Path::new(filename).exists() {
+        eprintln!("❌ Error: '{}' not found.", filename);
+        return false;
+    }
+
+    let source = match fs::read_to_string(filename) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Read Error: {}", e);
+            return false;
+        }
+    };
+
     let prog = match grammar::parse(&source) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Parse Error in {}: {:?}", filename, e);
-            return;
+            return false;
         }
     };
 
-    println!("🤖 --- INTERPRETER ---");
     let mut i = interpreter::Interpreter::new();
     if let Err(e) = i.run(prog) {
         eprintln!("Interpreter Error: {}", e);
+        return false;
+    }
+    true
+}
+
+fn run_compiler(filename: &str, _emit_rust: bool, verbose: bool) -> Result<PathBuf, String> {
+    if !std::path::Path::new(filename).exists() {
+        return Err(format!("'{}' not found.", filename));
     }
 
-    // 2. Compile Project
-    println!("🔨 --- COMPILING ---");
     let pm = BuildManager::new("kiro_build_cache");
     if let Err(e) = pm.init() {
-        eprintln!("Init Error: {}", e);
-        return;
+        return Err(format!("Init Error: {}", e));
     }
 
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -54,8 +202,25 @@ async fn main() {
     let dir = path.parent().map(|p| p.to_str().unwrap()).unwrap_or("");
     build_recursive(name, dir, &mut seen, &pm, true);
 
-    if let Err(e) = pm.run() {
-        eprintln!("Run Error: {}", e);
+    match pm.build(verbose) {
+        Ok(output_path) => Ok(output_path),
+        Err(e) => Err(format!("Build Error: {}", e)),
+    }
+}
+
+fn execute_binary(path: PathBuf) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!("Binary not found at {:?}", path));
+    }
+
+    let status = Command::new(&path)
+        .status()
+        .map_err(|e| format!("Failed to execute binary: {}", e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Process exited with status: {}", status))
     }
 }
 

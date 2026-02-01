@@ -52,27 +52,35 @@ impl BuildManager {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
-    pub fn run(&self) -> Result<(), String> {
-        println!("🚀 Compiling and Running...\n");
+    pub fn build(&self, verbose: bool) -> Result<std::path::PathBuf, String> {
+        if verbose {
+            println!("🚀 Compiling...\n");
+        }
 
         let output = Command::new("cargo")
-            .arg("run")
+            .arg("build")
             .arg("--quiet") // Less noise
             .current_dir(&self.build_dir)
             .output()
             .map_err(|e| format!("Failed to execute cargo: {}", e))?;
 
-        if !output.stdout.is_empty() {
+        if verbose && !output.stdout.is_empty() {
             println!("{}", String::from_utf8_lossy(&output.stdout));
         }
-        if !output.stderr.is_empty() {
+
+        // Show stderr if verbose OR if compilation failed
+        if (!output.status.success() || verbose) && !output.stderr.is_empty() {
             eprintln!("{}", String::from_utf8_lossy(&output.stderr));
         }
 
         if output.status.success() {
-            Ok(())
+            let exe_path = Path::new(&self.build_dir)
+                .join("target")
+                .join("debug")
+                .join("kiro_script");
+            Ok(exe_path)
         } else {
-            Err("Runtime execution failed.".to_string())
+            Err("Compilation failed.".to_string())
         }
     }
     fn create_cargo_toml(&self) -> Result<(), String> {

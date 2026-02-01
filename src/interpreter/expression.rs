@@ -355,12 +355,52 @@ impl Interpreter {
                                 .to_string())
                         }
                     }
-                } else if let Statement::RustFnDecl { .. } = func_stmt {
-                    // Rust-backed function cannot be executed in interpreter
-                    Err(format!(
-                        "Rust Function Error: '{}' is a Rust-backed function and cannot be executed in interpreter mode. Compile to run.",
+                } else if let Statement::RustFnDecl {
+                    params,
+                    return_type,
+                    ..
+                } = func_stmt
+                {
+                    // 1. Evaluate arguments (to ensure side-effects happen or checks pass)
+                    let mut arg_values = Vec::new();
+                    for arg in args {
+                        arg_values.push(self.eval_expr(arg)?);
+                    }
+
+                    if params.len() != arg_values.len() {
+                        return Err(format!(
+                            "Function '{}' expects {} args, got {}.",
+                            func_debug_name,
+                            params.len(),
+                            arg_values.len()
+                        ));
+                    }
+
+                    println!(
+                        "ℹ️ [Interpreter] Simulator: Calling host function '{}' (MOCK)",
                         func_debug_name
-                    ))
+                    );
+
+                    // 2. Return Mock Value based on return_type
+                    match return_type {
+                        crate::grammar::grammar::KiroType::Num => Ok(RuntimeVal::Float(0.0)),
+                        crate::grammar::grammar::KiroType::Str => {
+                            Ok(RuntimeVal::String("MOCK_STRING".to_string()))
+                        }
+                        crate::grammar::grammar::KiroType::Bool => Ok(RuntimeVal::Bool(false)),
+                        crate::grammar::grammar::KiroType::List(_, _) => {
+                            Ok(RuntimeVal::List(vec![]))
+                        }
+                        crate::grammar::grammar::KiroType::Map(_, _, _) => {
+                            Ok(RuntimeVal::Map(std::collections::HashMap::new()))
+                        }
+                        crate::grammar::grammar::KiroType::Void => Ok(RuntimeVal::Void),
+                        _ => {
+                            // For complex types (Custom, Pipe, Adr), return Void or simple fallback
+                            // to avoid complex construction logic in interpreter.
+                            Ok(RuntimeVal::Void)
+                        }
+                    }
                 } else {
                     Err(format!("'{}' is not a function.", func_debug_name))
                 }
