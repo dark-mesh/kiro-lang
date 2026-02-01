@@ -27,18 +27,35 @@ Value your time? Just clone and run.
 
 - [Rust & Cargo](https://rustup.rs/) installed.
 
-### Running a Program
+### Installing
 
-1. Create a file named `main.kiro` in the project root.
-2. Run the compiler/interpreter setup:
-   ```bash
-   cargo run
-   ```
-   This will:
-   - Interpret the code immediately for feedback.
-   - Recursively parse and compile all imported modules.
-   - Transpile the project to Rust in `kiro_build_cache/`.
-   - Compile and execute the transpiled Rust binary.
+Compile the Kiro binary and add it to your path:
+
+```bash
+cargo build --release
+cp target/release/kiro-lang /usr/local/bin/kiro # example
+```
+
+### Usage
+
+Kiro is designed for a fast feedback loop. By default, it runs your code through the interpreter for immediate validation, then compiles and executes it via Rust for production performance.
+
+```bash
+# Full Pipeline: Interpret -> Compile -> Execute
+kiro main.kiro
+
+# Fast Validation: Interpret ONLY
+kiro check main.kiro
+
+# Production Build: Compile ONLY
+kiro build main.kiro
+
+# Skip interpreter validation (e.g. for CI or heavy host modules usage)
+kiro main.kiro --no-interpret
+
+# Show compiler logs
+kiro main.kiro --verbose
+```
 
 ---
 
@@ -101,7 +118,7 @@ main()
 ```
 
 - **Qualified Access**: Use `module.member` to access exported functions or variables.
-- **Recursive Loading**: The compiler and interpreter automatically resolve dependencies.
+- **Embedded Standard Library**: Kiro comes with a built-in standard library (e.g., `std_fs`, `std_net`, `std_env`) embedded directly in the binary for zero-configuration portability.
 
 ### 3. Structs & Mutation
 
@@ -308,6 +325,8 @@ var result = maybe_fail(1)
 on (result) {
     // Smart Casting: 'result' is shadowed here as a 'str'
     print "Success: " + result
+} error PermissionDenied {
+    print "Error: Access denied."
 } error NotFound {
     print "Error: File was not found."
 } error {
@@ -355,7 +374,7 @@ pub fn read_file(args: Vec<RuntimeVal>) -> Result<RuntimeVal, KiroError> {
 }
 ```
 
-- **Interpreter Behavior**: The interpreter does not execute Rust glue. Calling a `rust fn` in interpretation mode will return a specific "Compile to Run" error.
+- **Interpreter Behavior**: The interpreter includes a **Simulator**. It does not execute Rust glue, but it validates the call (argument count/types) and returns a mock value (e.g., an empty string or `0.0`) so the script can proceed with logical validation without crashing.
 - **Compiler parity**: Results from Rust are strictly type-checked and integrated into Kiro's error handling (`on/error`).
 
 ---
@@ -366,6 +385,7 @@ Kiro uses a **Double Pass** system:
 
 1.  **Interpreter (`src/interpreter/`)**:
     - Walks the AST and maintains a runtime environment.
+    - **Simulator**: Provides mock responses for `rust fn` to enable validation without Rust compilation.
     - Recursively loads and executes imported modules in isolation.
 2.  **Transpiler (`src/compiler/`)**:
     - Converts Kiro to idiomatic **Rust**.
@@ -377,6 +397,7 @@ Kiro uses a **Double Pass** system:
 - `src/grammar/`: Language rules and parser (Rust Sitter).
 - `src/interpreter/`: Recursive execution engine and value representations.
 - `src/compiler/`: Rust code generation logic.
+- `src/kiro_std/`: Standard library source code (Embedded in binary).
 - `src/build_manager.rs`: Cargo project lifecycle management.
 - `main.kiro`: Entry point script.
 
