@@ -59,6 +59,10 @@ async fn main() {
     }
 }
 
+#[derive(rust_embed::RustEmbed)]
+#[folder = "src/kiro_std/"]
+pub struct StdAssets;
+
 fn build_recursive(
     name: &str,
     base_dir: &str,
@@ -72,25 +76,34 @@ fn build_recursive(
     seen.insert(name.to_string());
 
     // Try to resolve module path:
-    // 1. If starts with "std_", look in src/kiro_std/{module_name}/std_{module_name}.kiro
+    // 1. If starts with "std_", look in embedded assets
     // 2. Otherwise, look in base_dir or current directory as {name}.kiro
-    let filename = if name.starts_with("std_") {
+    let src = if name.starts_with("std_") {
         let module_name = &name[4..]; // Remove "std_" prefix
-        format!("src/kiro_std/{}/{}.kiro", module_name, name)
-    } else if !base_dir.is_empty() {
-        format!("{}/{}.kiro", base_dir, name)
+        // Map std_fs -> fs/std_fs.kiro
+        let asset_path = format!("{}/{}.kiro", module_name, name);
+        StdAssets::get(&asset_path)
+            .map(|f| std::str::from_utf8(f.data.as_ref()).unwrap().to_string())
+            .expect(&format!(
+                "Standard library module '{}' not found in embedded assets",
+                name
+            ))
     } else {
-        format!("{}.kiro", name)
-    };
+        let filename = if !base_dir.is_empty() {
+            format!("{}/{}.kiro", base_dir, name)
+        } else {
+            format!("{}.kiro", name)
+        };
 
-    let src = match fs::read_to_string(&filename) {
-        Ok(s) => s,
-        Err(_) => {
-            eprintln!(
-                "❌ Compiler Warning: File '{}' not found during build.",
-                filename
-            );
-            return;
+        match fs::read_to_string(&filename) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!(
+                    "❌ Compiler Warning: File '{}' not found during build.",
+                    filename
+                );
+                return;
+            }
         }
     };
 
@@ -123,14 +136,19 @@ fn build_recursive(
     // If this is a std module, also copy its header.rs content
     if name.starts_with("std_") {
         let module_suffix = &name[4..];
-        let header_path = format!("src/kiro_std/{}/header.rs", module_suffix);
-        if let Ok(header_content) = fs::read_to_string(&header_path) {
+        let header_path = format!("{}/header.rs", module_suffix);
+        if let Some(file) = StdAssets::get(&header_path) {
+            let header_content = std::str::from_utf8(file.data.as_ref()).unwrap();
             // Strip the initial use statement since we already have it in the main header
             let content = header_content
                 .lines()
-                .filter(|l| !l.starts_with("use kiro_runtime"))
+                .filter(|l| {
+                    !l.trim().starts_with("use crate::")
+                        && !l.trim().starts_with("use kiro_runtime")
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
+
             if let Err(e) = pm.append_header(&content) {
                 eprintln!("Failed to append header for {}: {}", name, e);
             }

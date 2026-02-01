@@ -374,17 +374,26 @@ impl Interpreter {
                 // Resolve module path:
                 // 1. If starts with "std_", look in src/kiro_std/{module_name}/std_{module_name}.kiro
                 // 2. Otherwise, look in current directory as {name}.kiro
-                let filename = if module_name.starts_with("std_") {
+                let (source, filename) = if module_name.starts_with("std_") {
                     let module_suffix = &module_name[4..]; // Remove "std_" prefix
-                    format!("src/kiro_std/{}/{}.kiro", module_suffix, module_name)
+                    let asset_path = format!("{}/{}.kiro", module_suffix, module_name);
+                    let content = crate::StdAssets::get(&asset_path)
+                        .map(|f| std::str::from_utf8(f.data.as_ref()).unwrap().to_string())
+                        .ok_or_else(|| {
+                            format!(
+                                "Standard library module '{}' not found in embedded assets",
+                                module_name
+                            )
+                        })?;
+                    (content, asset_path)
                 } else {
-                    format!("{}.kiro", module_name)
+                    let filename = format!("{}.kiro", module_name);
+                    let content = std::fs::read_to_string(&filename)
+                        .map_err(|_| format!("Module '{}' not found", filename))?;
+                    (content, filename)
                 };
-                println!("📦 Importing {}...", filename);
 
-                // A. Read the file
-                let source = std::fs::read_to_string(&filename)
-                    .map_err(|_| format!("Module '{}' not found", filename))?;
+                println!("📦 Importing {}...", filename);
 
                 // B. Parse it
                 // We need to access the parse function.
