@@ -228,11 +228,32 @@ impl Compiler {
             }
             // 3. Normal Call -> await
             Expression::Call(func, _, args, _) => {
+                // Determine if we need .await (Access func by reference BEFORE move)
+                let needs_await = if let Expression::Variable(v) = &*func {
+                    // If we know the function is pure, it's Sync -> No await
+                    if let Some(info) = self.functions.get(&v.value) {
+                        !info.is_pure
+                    } else {
+                        // Default to await for unknown/external
+                        true
+                    }
+                } else {
+                    true // indirect call
+                };
+
                 // Purity Check
                 if let Expression::Variable(v) = &*func {
                     if let Some(info) = self.functions.get(&v.value) {
+                        // Strict Purity Rule: Inner Prohibition
+                        if self.in_pure_context && !info.is_pure {
+                            panic!(
+                                "Compiler Error: Pure function cannot call impure/async function '{}' inside a pure function.",
+                                v.value
+                            );
+                        }
+
                         if info.is_pure {
-                            // Check Args
+                            // Check Args for mutability
                             for arg in &args {
                                 let mut current = arg;
                                 while let Expression::FieldAccess(target, _, _) = current {
@@ -260,7 +281,11 @@ impl Compiler {
                     .map(|a| format!("({}).clone()", self.compile_expr(a.clone())))
                     .collect();
 
-                format!("{}({}).await", func_name, arg_strs.join(", "))
+                if needs_await {
+                    format!("{}({}).await", func_name, arg_strs.join(", "))
+                } else {
+                    format!("{}({})", func_name, arg_strs.join(", "))
+                }
             }
 
             // 4. Run Call -> tokio::spawn
@@ -270,6 +295,16 @@ impl Compiler {
                 // This is a bit tricky. Let's handle it manually:
 
                 if let Expression::Call(func, _, args, _) = *call_expr {
+                    // Check if target is pure (Sync)
+                    let is_pure_target = if let Expression::Variable(v) = &*func {
+                        self.functions
+                            .get(&v.value)
+                            .map(|i| i.is_pure)
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+
                     let func_name = self.compile_expr(*func);
                     let arg_strs: Vec<String> = args
                         .iter()
@@ -277,7 +312,19 @@ impl Compiler {
                         .collect();
 
                     // Spawn logic:
-                    format!("tokio::spawn({}({}))", func_name, arg_strs.join(", "))
+                    if is_pure_target {
+                        // Sync function: Wrap in async block
+                        // tokio::spawn(async move { foo(args) })
+                        format!(
+                            "tokio::spawn(async move {{ {}({}) }})",
+                            func_name,
+                            arg_strs.join(", ")
+                        )
+                    } else {
+                        // Async function: Call directly (returns Future)
+                        // tokio::spawn(foo(args))
+                        format!("tokio::spawn({}({}))", func_name, arg_strs.join(", "))
+                    }
                 } else {
                     "/* Error: run must be followed by a function call */".to_string()
                 }

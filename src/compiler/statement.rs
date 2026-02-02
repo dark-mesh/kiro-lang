@@ -274,8 +274,11 @@ impl Compiler {
                     (ret_def, body_str)
                 };
 
+                let async_kw = if is_pure { "" } else { "async" };
+
                 format!(
-                    "pub async fn {}({}) -> {} {}",
+                    "pub {} fn {}({}) -> {} {}",
+                    async_kw,
                     name,
                     param_strs.join(", "),
                     ret_type,
