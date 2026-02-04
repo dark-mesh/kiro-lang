@@ -1,0 +1,5 @@
+fn main() {
+    let a = "Immutable"
+    var b = move a // FAIL: Cannot move immutable
+}
+main()

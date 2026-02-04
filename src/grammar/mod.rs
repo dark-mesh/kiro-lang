@@ -111,22 +111,9 @@ pub mod grammar {
 
         // 2. Struct Definition (No commas, whitespace separated)
         // struct User { name: str age: num }
-        StructDef {
-            #[rust_sitter::leaf(text = "struct")]
-            _struct: (),
-
-            // Struct names must be Capitalized to distinguish from variables
-            name: StructNameVal,
-
-            #[rust_sitter::leaf(text = "{")]
-            _l: (),
-
-            #[rust_sitter::repeat(non_empty = false)]
-            fields: Vec<FieldDef>,
-
-            #[rust_sitter::leaf(text = "}")]
-            _r: (),
-        },
+        // 2. Struct Definition (No commas, whitespace separated)
+        // struct User { name: str age: num }
+        StructDef(StructDef),
         // Error Definition: error NotFound = "Description"
         ErrorDef {
             #[rust_sitter::leaf(text = "error")]
@@ -198,62 +185,14 @@ pub mod grammar {
             // Optional "off" block for the filter
             else_clause: Option<OffClause>,
         },
-        FunctionDef {
-            #[rust_sitter::leaf(text = "pure")]
-            pure_kw: Option<()>, // Optional "pure" keyword
-
-            #[rust_sitter::leaf(text = "fn")]
-            _fn: (),
-
-            #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
-            name: String,
-
-            #[rust_sitter::leaf(text = "(")]
-            _l: (),
-            #[rust_sitter::delimited(
-                #[rust_sitter::leaf(text = ",")] ()
-            )]
-            params: Vec<FuncParam>,
-            #[rust_sitter::leaf(text = ")")]
-            _r: (),
-
-            #[rust_sitter::leaf(text = "->")]
-            _arrow: Option<()>,
-            return_type: Option<KiroType>,
-            #[rust_sitter::leaf(text = "!")]
-            can_error: Option<()>,
-
-            body: Block, // Required body for normal functions
-        },
+        FunctionDef(FunctionDef),
         // Rust-backed function declaration (no body)
         // Arrow and return type are REQUIRED to avoid grammar ambiguity
         // Use `rust fn foo() -> void` for functions with no return
-        RustFnDecl {
-            #[rust_sitter::leaf(text = "rust")]
-            _rust_kw: (),
-
-            #[rust_sitter::leaf(text = "fn")]
-            _fn: (),
-
-            #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
-            name: String,
-
-            #[rust_sitter::leaf(text = "(")]
-            _l: (),
-            #[rust_sitter::delimited(
-                #[rust_sitter::leaf(text = ",")] ()
-            )]
-            params: Vec<FuncParam>,
-            #[rust_sitter::leaf(text = ")")]
-            _r: (),
-
-            #[rust_sitter::leaf(text = "->")]
-            _arrow: (), // REQUIRED
-            return_type: KiroType, // REQUIRED
-            #[rust_sitter::leaf(text = "!")]
-            can_error: Option<()>,
-            // No body - this is an external function
-        },
+        // Rust-backed function declaration (no body)
+        // Arrow and return type are REQUIRED to avoid grammar ambiguity
+        // Use `rust fn foo() -> void` for functions with no return
+        RustFnDecl(RustFnDecl),
         // 1. Give: give <channel> <value>
         Give(
             #[rust_sitter::leaf(text = "give")] (),
@@ -284,6 +223,13 @@ pub mod grammar {
 
         ExprStmt(Expression),
         Print(#[rust_sitter::leaf(text = "print")] (), Expression),
+
+        // Documented Item
+        Documented {
+            #[rust_sitter::repeat(non_empty = true)]
+            doc: Vec<DocComment>,
+            item: AnnotatableItem,
+        },
     }
     #[derive(Debug, Clone)]
     pub enum Expression {
@@ -357,7 +303,12 @@ pub mod grammar {
         StringLit(StringVal),
 
         #[rust_sitter::prec_left(1)]
+        // 5. Variable Reference
         Variable(VariableVal),
+
+        // 6. Move Expression: move x
+        #[rust_sitter::prec_right(10)]
+        MoveExpr(#[rust_sitter::leaf(text = "move")] (), VariableVal),
 
         #[rust_sitter::prec_left(1)]
         AdrInit(#[rust_sitter::leaf(text = "adr")] (), KiroType),
@@ -468,10 +419,26 @@ pub mod grammar {
             Box<Expression>,
         ),
     }
+    // 7. Documentation Comments (/// ...)
+    #[derive(Debug, Clone)]
+    pub struct DocComment {
+        #[rust_sitter::leaf(pattern = r"///[^\n]*", transform = |s| s.to_string())]
+        pub content: String,
+    }
+
     #[rust_sitter::extra]
     #[allow(dead_code)]
     pub struct Whitespace {
-        #[rust_sitter::leaf(pattern = r"\s+|//[^\n]*")]
+        // Match whitespace OR comments starting with // but NOT ///
+        // Since Rust Regex doesn't support lookahead, we rely on tree-sitter matching DocComment first if defined.
+        // But Whitespace is 'extra', so it has high precedence globally to be skipped?
+        // Actually, if we define DocComment as a regular rule used in FunctionDef, tree-sitter *should* prioritize it
+        // over the extra if it appears in a valid position.
+        // However, safely excluding /// from the // rule is better.
+        // Match whitespace OR comments starting with // but NOT ///
+        // Pattern: // followed by (Start of line OR anything that isn't /)
+        // We use |// to match empty comments or EOF case, relying on Longest Match to prefer DocComment for ///
+        #[rust_sitter::leaf(pattern = r"\s+|//[^/][^\n]*|//")]
         _whitespace: (),
     }
     #[derive(Debug, Clone)]
@@ -528,6 +495,87 @@ pub mod grammar {
         pub condition: Expression,
         #[rust_sitter::leaf(text = ")")]
         _r: (),
+    }
+    #[derive(Debug, Clone)]
+    pub enum AnnotatableItem {
+        StructDef(StructDef),
+        FunctionDef(FunctionDef),
+        RustFnDecl(RustFnDecl),
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct StructDef {
+        #[rust_sitter::leaf(text = "struct")]
+        pub _struct: (),
+
+        // Struct names must be Capitalized to distinguish from variables
+        pub name: StructNameVal,
+
+        #[rust_sitter::leaf(text = "{")]
+        pub _l: (),
+
+        #[rust_sitter::repeat(non_empty = false)]
+        pub fields: Vec<FieldDef>,
+
+        #[rust_sitter::leaf(text = "}")]
+        pub _r: (),
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct FunctionDef {
+        #[rust_sitter::leaf(text = "pure")]
+        pub pure_kw: Option<()>, // Optional "pure" keyword
+
+        #[rust_sitter::leaf(text = "fn")]
+        pub _fn: (),
+
+        #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
+        pub name: String,
+
+        #[rust_sitter::leaf(text = "(")]
+        pub _l: (),
+        #[rust_sitter::delimited(
+            #[rust_sitter::leaf(text = ",")] ()
+        )]
+        pub params: Vec<FuncParam>,
+        #[rust_sitter::leaf(text = ")")]
+        pub _r: (),
+
+        #[rust_sitter::leaf(text = "->")]
+        pub _arrow: Option<()>,
+        pub return_type: Option<KiroType>,
+        #[rust_sitter::leaf(text = "!")]
+        pub can_error: Option<()>,
+
+        pub body: Block, // Required body for normal functions
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct RustFnDecl {
+        #[rust_sitter::leaf(text = "rust")]
+        pub _rust_kw: (),
+
+        #[rust_sitter::leaf(text = "fn")]
+        pub _fn: (),
+
+        #[rust_sitter::leaf(pattern = r"[a-z_]+", transform = |s| s.to_string())]
+        pub name: String,
+
+        #[rust_sitter::leaf(text = "(")]
+        pub _l: (),
+        #[rust_sitter::delimited(
+            #[rust_sitter::leaf(text = ",")] ()
+        )]
+        pub params: Vec<FuncParam>,
+        #[rust_sitter::leaf(text = ")")]
+        pub _r: (),
+
+        #[rust_sitter::leaf(text = "->")]
+        pub _arrow: (), // REQUIRED
+        pub return_type: KiroType, // REQUIRED
+        #[rust_sitter::leaf(text = "!")]
+        pub can_error: Option<()>,
+        // No body - this is an external function
     }
 }
 pub use grammar::*;

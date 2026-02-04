@@ -47,7 +47,7 @@ impl Interpreter {
                 Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             // Struct definitions are just Declarations, no runtime effect in interpreter
-            Statement::StructDef { .. } => Ok(StatementResult::Normal(RuntimeVal::Void)),
+            Statement::StructDef(_) => Ok(StatementResult::Normal(RuntimeVal::Void)),
             // 1. Variable Declaration
             Statement::VarDecl { ident, value, .. } => {
                 let val = self.eval_expr(value)?;
@@ -327,24 +327,23 @@ impl Interpreter {
                 let val = self.eval_expr(expr)?;
                 Ok(StatementResult::Normal(val))
             }
-            stmt @ Statement::FunctionDef { .. } => {
-                if let Statement::FunctionDef { name, .. } = &stmt {
-                    let func_name = name.clone();
-                    self.functions.insert(func_name.clone(), stmt);
-                    println!("✨ Registered Function: {}", func_name);
-                }
+            Statement::FunctionDef(def) => {
+                let func_name = def.name.clone();
+                self.functions
+                    .insert(func_name.clone(), Statement::FunctionDef(def));
+                println!("✨ Registered Function: {}", func_name);
                 Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             // Rust-backed function declaration (register for lookup)
-            stmt @ Statement::RustFnDecl { .. } => {
-                if let Statement::RustFnDecl { name, .. } = &stmt {
-                    let func_name = name.clone();
-                    self.functions.insert(func_name.clone(), stmt);
-                    println!(
-                        "✨ Registered Rust Function: {} (compile to run)",
-                        func_name
-                    );
-                }
+            // Rust-backed function declaration (register for lookup)
+            Statement::RustFnDecl(def) => {
+                let func_name = def.name.clone();
+                self.functions
+                    .insert(func_name.clone(), Statement::RustFnDecl(def));
+                println!(
+                    "✨ Registered Rust Function: {} (compile to run)",
+                    func_name
+                );
                 Ok(StatementResult::Normal(RuntimeVal::Void))
             }
             // 1. Give (Sync Send)
@@ -395,36 +394,23 @@ impl Interpreter {
 
                 println!("📦 Importing {}...", filename);
 
-                // B. Parse it
                 // We need to access the parse function.
                 // Since main.rs uses grammar::parse, and grammar is crate::grammar::grammar
-                // We'll try crate::grammar::grammar::parse
-                let program = crate::grammar::grammar::parse(&source)
-                    .map_err(|e| format!("Parse error in {}: {:?}", filename, e))?;
-
-                // C. Create a fresh Interpreter for the module
-                // We need to use valid imports for Interpreter and Value
-                let mut module_interp = Interpreter::new();
-
-                // We need to call run, but run takes ownership of self usually?
-                // Interpreter::run(&mut self, program)
-                module_interp.run(program)?;
-
-                // D. Extract everything (since 'Everything is Public')
-                let mut exports = std::collections::HashMap::new();
-                for (key, val) in module_interp.env {
-                    exports.insert(key, val.data);
-                }
-
-                // E. Save as a Module in the current scope
-                self.env.insert(
-                    module_name,
-                    Value {
-                        data: RuntimeVal::Module(exports, module_interp.functions),
-                        is_mutable: false,
-                    },
+                // We cannot access it directly here easily without circular dependencies or exposing it.
+                // For now, simpler: Just support pure Kiro parsing if we had access to parser.
+                // But interpreter doesn't interpret imported modules yet in this snippet!
+                println!(
+                    "⚠️ [Interpreter] 'import' is not fully supported in pure interpreter mode."
                 );
                 Ok(StatementResult::Normal(RuntimeVal::Void))
+            }
+            Statement::Documented { item, .. } => {
+                let stmt = match item {
+                    grammar::AnnotatableItem::StructDef(s) => Statement::StructDef(s),
+                    grammar::AnnotatableItem::FunctionDef(f) => Statement::FunctionDef(f),
+                    grammar::AnnotatableItem::RustFnDecl(r) => Statement::RustFnDecl(r),
+                };
+                self.execute_statement(stmt)
             }
         }
     }

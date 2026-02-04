@@ -14,6 +14,7 @@ pub struct VarInfo {
 pub struct FunctionInfo {
     pub is_pure: bool,
     pub can_error: bool,
+    pub doc: Option<String>,
 }
 
 pub struct Compiler {
@@ -22,6 +23,8 @@ pub struct Compiler {
     pub functions: HashMap<String, FunctionInfo>,
     pub in_pure_context: bool,
     pub in_failable_fn: bool,
+    pub pure_scope_params: HashSet<String>, // Parameters allowed in pure function scope
+    pub moved_vars: HashSet<String>,        // Track moved variables to prevent use-after-move
 }
 
 impl Compiler {
@@ -32,6 +35,8 @@ impl Compiler {
             functions: HashMap::new(),
             in_pure_context: false,
             in_failable_fn: false,
+            pure_scope_params: HashSet::new(),
+            moved_vars: HashSet::new(),
         }
     }
 
@@ -138,27 +143,54 @@ impl Compiler {
         let mut body = String::new();
 
         // 0. Pre-Scan Functions for Metadata (Purity Check)
+        // 0. Pre-Scan Functions for Metadata (Purity Check)
         for stmt in &program.statements {
-            if let grammar::Statement::FunctionDef {
-                name,
-                pure_kw,
-                can_error,
-                ..
-            } = stmt
-            {
-                let is_pure = pure_kw.is_some();
-                let can_error = can_error.is_some();
-                self.functions
-                    .insert(name.clone(), FunctionInfo { is_pure, can_error });
+            match stmt {
+                grammar::Statement::Documented { doc, item } => {
+                    if let grammar::AnnotatableItem::FunctionDef(def) = item {
+                        let is_pure = def.pure_kw.is_some();
+                        let can_error = def.can_error.is_some();
+                        let doc_str = Some(
+                            doc.iter()
+                                .map(|d| d.content.trim_start_matches("///").trim().to_string())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        );
+                        self.functions.insert(
+                            def.name.clone(),
+                            FunctionInfo {
+                                is_pure,
+                                can_error,
+                                doc: doc_str,
+                            },
+                        );
+                    }
+                }
+                grammar::Statement::FunctionDef(def) => {
+                    let is_pure = def.pure_kw.is_some();
+                    let can_error = def.can_error.is_some();
+                    self.functions.insert(
+                        def.name.clone(),
+                        FunctionInfo {
+                            is_pure,
+                            can_error,
+                            doc: None,
+                        },
+                    );
+                }
+                _ => {}
             }
         }
 
         for statement in program.statements {
             // Check if it should be hoisted
-            let is_hoisted = matches!(
-                statement,
-                grammar::Statement::Import { .. } | grammar::Statement::StructDef { .. }
-            );
+            let is_hoisted = match &statement {
+                grammar::Statement::Import { .. } | grammar::Statement::StructDef(_) => true,
+                grammar::Statement::Documented { item, .. } => {
+                    matches!(item, grammar::AnnotatableItem::StructDef(_))
+                }
+                _ => false,
+            };
 
             let line = self.compile_statement(statement);
 

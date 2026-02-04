@@ -3,8 +3,33 @@ use super::Compiler;
 use crate::grammar::grammar::{self, Expression};
 
 impl Compiler {
-    pub fn compile_expr(&self, expr: Expression) -> String {
+    pub fn compile_expr(&mut self, expr: Expression) -> String {
         match expr {
+            Expression::MoveExpr(_, ident) => {
+                let name = ident.value;
+
+                // 1. Purity Check
+                if self.in_pure_context {
+                    panic!("Compiler Error: 'move' is forbidden in pure functions.");
+                }
+
+                // 2. Mutable Check
+                if let Some(info) = self.known_vars.get(&name) {
+                    if !info.is_mutable {
+                        panic!("Compiler Error: Cannot move immutable variable '{}'.", name);
+                    }
+                } else {
+                    panic!("Compiler Error: Variable '{}' not found.", name);
+                }
+
+                // 3. Mark as Moved
+                self.moved_vars.insert(name.clone());
+
+                // 4. Generate Rust: std::mem::take(&mut var)
+                // This swaps the value with default (void/empty)
+                format!("std::mem::take(&mut {})", name)
+            }
+
             Expression::Variable(v) => {
                 // Check if this is an error type (starts with uppercase)
                 if v.value
@@ -16,7 +41,25 @@ impl Compiler {
                     // Assume it's an error type - generate Err(kiro_error_Name())
                     return format!("Err(kiro_error_{}())", v.value);
                 }
-                v.value
+
+                // Strict Purity: Ban capturing external variables
+                if self.in_pure_context && !self.pure_scope_params.contains(&v.value) {
+                    panic!(
+                        "Compiler Error: Pure function cannot capture external variable '{}'. Only parameters and local variables are allowed.",
+                        v.value
+                    );
+                }
+
+                // Move Check: Ensure variable hasn't been moved
+                if self.moved_vars.contains(&v.value) {
+                    panic!(
+                        "Compiler Error: Variable '{}' was moved and cannot be used.",
+                        v.value
+                    );
+                }
+
+                // Default Behavior: Clone variable access to ensure Copy Semantics
+                format!("({}).clone()", v.value)
             }
 
             // 2. Compile Struct Init
@@ -30,19 +73,14 @@ impl Compiler {
             }
 
             // 3. Compile Field Access
-            // Rust supports auto-deref for dot operator on many types.
-            // If it's a raw struct: user.name works.
-            // If it's a reference:            // 3. Compile Field Access
             Expression::FieldAccess(target, _, field) => {
                 // Check if the target is a known module (e.g., "math")
                 if let Expression::Variable(v) = &*target {
                     if self.imported_modules.contains(&v.value) {
-                        // It is a module! Use Rust's '::' syntax
                         return format!("{}::{}", v.value, field.value);
                     }
                 }
 
-                // Use helper trait for Auto-Deref
                 format!(
                     "{}.kiro_get(|v| v.{}.clone())",
                     self.compile_expr(*target),
@@ -50,7 +88,6 @@ impl Compiler {
                 )
             }
 
-            // FIXED: Unwrap NumberVal
             Expression::Number(num_val) => {
                 let n: f64 = num_val.value.parse().unwrap();
                 if n.fract() == 0.0 {
@@ -60,7 +97,6 @@ impl Compiler {
                 }
             }
 
-            // FIXED: Unwrap StringVal
             Expression::StringLit(s) => format!("String::from({})", s.value),
             Expression::BoolLit(b) => match b {
                 grammar::BoolVal::True(_) => "true".to_string(),
@@ -70,10 +106,8 @@ impl Compiler {
             // Adr Init (Lazy / Void)
             Expression::AdrInit(_, inner) => {
                 if let grammar::KiroType::Void = inner {
-                    // adr void -> usize 0
                     "0usize".to_string()
                 } else {
-                    // adr T -> Option<...> = None
                     let type_str = crate::compiler::types::compile_type(&inner);
                     format!(
                         "Option::<std::sync::Arc<std::sync::Mutex<{}>>>::None",
@@ -86,7 +120,6 @@ impl Compiler {
             Expression::PipeInit(_, pipe_type) => {
                 let inner_type = crate::compiler::types::compile_type(&pipe_type);
                 if let grammar::KiroType::Void = pipe_type {
-                    // KiroPipe<()>
                     "{ let (tx, rx) = async_channel::unbounded(); KiroPipe::<()> { tx, rx } }"
                         .to_string()
                 } else {
@@ -97,7 +130,6 @@ impl Compiler {
                 }
             }
 
-            // 6. Take -> .rx.recv().await
             Expression::Take(_, channel) => {
                 if self.in_pure_context {
                     panic!("Pure Function Error: 'take' is forbidden.");
@@ -105,20 +137,13 @@ impl Compiler {
                 let ch = self.compile_expr(*channel);
                 format!("{}.rx.recv().await.unwrap()", ch)
             }
-            // New Pointer Logic
+
             Expression::Ref(_, target) => {
-                // ref x  ->  Some(Arc::new(Mutex::new(x)))
                 let val = self.compile_expr(*target);
                 format!("Some(std::sync::Arc::new(std::sync::Mutex::new({})))", val)
             }
+
             Expression::Deref(_, target) => {
-                // deref x
-                // If x is regular Adr (Option<Arc...>), we unwrap.
-                // If x is Adr<Void> (usize), we panic or forbid?
-                // The implementation plan says "Prohibitions (Strict Checks): Dereference: Check if target is Adr(Void)."
-                // NOTE: We don't have type info of expressions easily available here in `compile_expr` without a type checker step.
-                // However, Rust compilation will fail if we try to unwrap a usize.
-                // Standard Adr: x.as_ref().unwrap().lock().unwrap()
                 let ptr = self.compile_expr(*target);
                 format!(
                     "*({}.as_ref().expect(\"Dereferencing Void/Null Pointer\").lock().unwrap())",
@@ -126,14 +151,12 @@ impl Compiler {
                 )
             }
 
-            // 2. List Init -> vec![...]
             Expression::ListInit(_, _, _, items, _) => {
                 let elems: Vec<String> =
                     items.iter().map(|e| self.compile_expr(e.clone())).collect();
                 format!("vec![{}]", elems.join(", "))
             }
 
-            // 3. Map Init -> HashMap::from(...)
             Expression::MapInit(_, _, _, _, pairs, _) => {
                 let entries: Vec<String> = pairs
                     .iter()
@@ -148,22 +171,16 @@ impl Compiler {
                 format!("std::collections::HashMap::from([{}])", entries.join(", "))
             }
 
-            // 4. 'at' Command
             Expression::At(col, _, key) => {
-                format!(
-                    "{}.kiro_at({})",
-                    self.compile_expr(*col),
-                    self.compile_expr(*key)
-                )
+                let col_str = self.compile_expr(*col);
+                let key_str = self.compile_expr(*key);
+                format!("{}.kiro_at({})", col_str, key_str)
             }
 
-            // 5. 'push' Command
             Expression::Push(list, _, val) => {
-                format!(
-                    "{}.push({})",
-                    self.compile_expr(*list),
-                    self.compile_expr(*val)
-                )
+                let list_str = self.compile_expr(*list);
+                let val_str = self.compile_expr(*val);
+                format!("{}.push({})", list_str, val_str)
             }
 
             Expression::Add(lhs, _, rhs) => format!(
@@ -220,31 +237,24 @@ impl Compiler {
                 self.compile_expr(*rhs)
             ),
             Expression::Range(start, _, end) => {
-                format!(
-                    "(({} as i64)..({} as i64))",
-                    self.compile_expr(*start),
-                    self.compile_expr(*end)
-                )
+                let start_str = self.compile_expr(*start);
+                let end_str = self.compile_expr(*end);
+                format!("(({} as i64)..({} as i64))", start_str, end_str)
             }
-            // 3. Normal Call -> await
             Expression::Call(func, _, args, _) => {
                 // Determine if we need .await (Access func by reference BEFORE move)
                 let needs_await = if let Expression::Variable(v) = &*func {
-                    // If we know the function is pure, it's Sync -> No await
                     if let Some(info) = self.functions.get(&v.value) {
                         !info.is_pure
                     } else {
-                        // Default to await for unknown/external
                         true
                     }
                 } else {
-                    true // indirect call
+                    true
                 };
 
-                // Purity Check
                 if let Expression::Variable(v) = &*func {
                     if let Some(info) = self.functions.get(&v.value) {
-                        // Strict Purity Rule: Inner Prohibition
                         if self.in_pure_context && !info.is_pure {
                             panic!(
                                 "Compiler Error: Pure function cannot call impure/async function '{}' inside a pure function.",
@@ -253,14 +263,12 @@ impl Compiler {
                         }
 
                         if info.is_pure {
-                            // Check Args for mutability
                             for arg in &args {
                                 let mut current = arg;
                                 while let Expression::FieldAccess(target, _, _) = current {
                                     current = target;
                                 }
                                 if let Expression::Variable(arg_v) = current {
-                                    // Check if known mutable
                                     if let Some(var_info) = self.known_vars.get(&arg_v.value) {
                                         if var_info.is_mutable {
                                             panic!(
@@ -332,7 +340,7 @@ impl Compiler {
         }
     }
 
-    pub fn compile_lvalue(&self, expr: Expression) -> String {
+    pub fn compile_lvalue(&mut self, expr: Expression) -> String {
         match expr {
             Expression::Variable(v) => v.value,
             Expression::FieldAccess(target, _, field) => {

@@ -7,6 +7,8 @@ pub mod values;
 
 use values::{RuntimeVal, Value};
 
+use std::collections::HashSet;
+
 #[derive(Debug, Clone)]
 pub enum StatementResult {
     Normal(RuntimeVal),
@@ -20,6 +22,7 @@ pub struct Interpreter {
     pub functions: HashMap<String, Statement>,
     pub in_pure_mode: bool,
     pub error_types: HashMap<String, String>, // name -> description
+    pub pure_scope_params: HashSet<String>,   // Allowed params in pure scope
 }
 
 impl Interpreter {
@@ -29,6 +32,7 @@ impl Interpreter {
             functions: HashMap::new(),
             in_pure_mode: false,
             error_types: HashMap::new(),
+            pure_scope_params: HashSet::new(),
         }
     }
     pub fn run(&mut self, program: grammar::Program) -> Result<(), String> {

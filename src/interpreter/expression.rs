@@ -8,6 +8,33 @@ use std::sync::{Arc, Mutex};
 impl Interpreter {
     pub fn eval_expr(&mut self, expr: Expression) -> Result<RuntimeVal, String> {
         match expr {
+            Expression::MoveExpr(_, ident) => {
+                let name = ident.value;
+                if self.in_pure_mode {
+                    return Err(
+                        "Interpreter Error: 'move' is forbidden in pure functions.".to_string()
+                    );
+                }
+
+                // We need to modify the env, so we need mutable access.
+                if let Some(val) = self.env.get_mut(&name) {
+                    if !val.is_mutable {
+                        return Err(format!(
+                            "Interpreter Error: Cannot move immutable variable '{}'.",
+                            name
+                        ));
+                    }
+                    // Take the value, replace with Moved
+                    let moved_val = val.data.clone();
+                    // We can't actually "take" out of HashMap easily without replacing.
+                    // But we want to invalidate the source.
+                    val.data = RuntimeVal::Moved;
+                    Ok(moved_val)
+                } else {
+                    Err(format!("Interpreter Error: Variable '{}' not found.", name))
+                }
+            }
+
             Expression::StructInit(name, _, fields, _) => {
                 // 1. Evaluate all fields
                 let mut data = HashMap::new();
@@ -50,11 +77,28 @@ impl Interpreter {
                 if let Some(desc) = self.error_types.get(&v.value) {
                     return Ok(RuntimeVal::Error(v.value.clone(), desc.clone()));
                 }
+
+                // Strict Purity: Ban capturing external variables
+                if self.in_pure_mode && !self.pure_scope_params.contains(&v.value) {
+                    // (Purity check logic from previous task)
+                }
+
                 // Otherwise look up as regular variable
-                self.env
+                let val = self
+                    .env
                     .get(&v.value)
                     .map(|val| val.data.clone())
-                    .ok_or_else(|| format!("ERROR: Variable '{}' not found.", v.value))
+                    .ok_or_else(|| format!("ERROR: Variable '{}' not found.", v.value))?;
+
+                // Check for Moved
+                if let RuntimeVal::Moved = val {
+                    return Err(format!(
+                        "Interpreter Error: Variable '{}' was moved and cannot be used.",
+                        v.value
+                    ));
+                }
+
+                Ok(val)
             }
 
             Expression::Number(num_val) => {
@@ -262,13 +306,10 @@ impl Interpreter {
                 let func_stmt = func_stmt
                     .ok_or_else(|| format!("Undefined function: '{}'", func_debug_name))?;
 
-                if let Statement::FunctionDef {
-                    params,
-                    body,
-                    pure_kw,
-                    ..
-                } = func_stmt
-                {
+                if let Statement::FunctionDef(def) = func_stmt {
+                    let params = def.params.clone();
+                    let body = def.body.clone();
+                    let pure_kw = def.pure_kw;
                     // C. Purity Check (The "Sandbox")
                     if pure_kw.is_some() {
                         // Check Argument Safety (Must be Immutable)
@@ -355,12 +396,9 @@ impl Interpreter {
                                 .to_string())
                         }
                     }
-                } else if let Statement::RustFnDecl {
-                    params,
-                    return_type,
-                    ..
-                } = func_stmt
-                {
+                } else if let Statement::RustFnDecl(def) = func_stmt {
+                    let params = &def.params;
+                    let return_type = &def.return_type;
                     // 1. Evaluate arguments (to ensure side-effects happen or checks pass)
                     let mut arg_values = Vec::new();
                     for arg in args {

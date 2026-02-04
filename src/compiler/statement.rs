@@ -20,7 +20,9 @@ impl Compiler {
             }
             // 1. Compile Struct Definition
             // 1. Compile Struct Definition
-            Statement::StructDef { name, fields, .. } => {
+            Statement::StructDef(def) => {
+                let name = def.name;
+                let fields = def.fields;
                 let field_strs: Vec<String> = fields
                     .iter()
                     .map(|f| format!("pub {}: {}", f.name.value, compile_type(&f.field_type)))
@@ -43,6 +45,10 @@ impl Compiler {
                 let val_str = self.compile_expr(value);
                 self.known_vars
                     .insert(ident.clone(), super::VarInfo { is_mutable: true });
+                // Track local vars in pure scope
+                if self.in_pure_context {
+                    self.pure_scope_params.insert(ident.clone());
+                }
                 // In Kiro, vars are mutable by default
                 format!("let mut {} = {};", ident, val_str)
             }
@@ -69,6 +75,10 @@ impl Compiler {
                             // Implicit Immutable Declaration (x = 10)
                             self.known_vars
                                 .insert(name.clone(), super::VarInfo { is_mutable: false });
+                            // Track local vars in pure scope
+                            if self.in_pure_context {
+                                self.pure_scope_params.insert(name.clone());
+                            }
                             format!("let {} = {};", name, rhs_str)
                         }
                     }
@@ -216,27 +226,36 @@ impl Compiler {
                     iterator, iter_call, iterator, iterator, inner_logic
                 )
             }
-            Statement::FunctionDef {
-                name,
-                params,
-                return_type,
-                body,
-                pure_kw,
-                can_error,
-                ..
-            } => {
+            Statement::FunctionDef(def) => {
+                let name = def.name;
+                let params = def.params;
+                let return_type = def.return_type;
+                let body = def.body;
+                let pure_kw = def.pure_kw;
+                let can_error = def.can_error;
                 let is_pure = pure_kw.is_some();
+
+                // Preserve existing doc if present (from pre-scan)
+                let existing_doc = self.functions.get(&name).and_then(|f| f.doc.clone());
+
                 self.functions.insert(
                     name.clone(),
                     super::FunctionInfo {
                         is_pure,
                         can_error: can_error.is_some(),
+                        doc: existing_doc,
                     },
                 );
 
                 let old_context = self.in_pure_context;
+                let old_pure_params = self.pure_scope_params.clone();
                 if is_pure {
                     self.in_pure_context = true;
+                    // Populate allowed params for pure scope
+                    self.pure_scope_params.clear();
+                    for p in &params {
+                        self.pure_scope_params.insert(p.name.clone());
+                    }
                 }
 
                 let param_strs: Vec<String> = params
@@ -254,6 +273,7 @@ impl Compiler {
 
                 self.in_pure_context = old_context;
                 self.in_failable_fn = old_in_failable;
+                self.pure_scope_params = old_pure_params; // Restore
 
                 let ret_def = if let Some(rt) = return_type {
                     if let crate::grammar::grammar::KiroType::Void = rt {
@@ -287,18 +307,18 @@ impl Compiler {
             }
 
             // Rust-backed function (external glue)
-            Statement::RustFnDecl {
-                name,
-                params,
-                return_type,
-                can_error,
-                ..
-            } => {
+            Statement::RustFnDecl(def) => {
+                let name = def.name;
+                let params = def.params;
+                let return_type = def.return_type;
+                let can_error = def.can_error;
+                let existing_doc = self.functions.get(&name).and_then(|f| f.doc.clone());
                 self.functions.insert(
                     name.clone(),
                     super::FunctionInfo {
                         is_pure: false,
                         can_error: can_error.is_some(),
+                        doc: existing_doc,
                     },
                 );
 
@@ -400,6 +420,14 @@ impl Compiler {
             Statement::Break(_) => "break;".to_string(),
             // 5. Continue -> continue
             Statement::Continue(_) => "continue;".to_string(),
+            Statement::Documented { item, .. } => {
+                let stmt = match item {
+                    grammar::AnnotatableItem::StructDef(s) => Statement::StructDef(s),
+                    grammar::AnnotatableItem::FunctionDef(f) => Statement::FunctionDef(f),
+                    grammar::AnnotatableItem::RustFnDecl(r) => Statement::RustFnDecl(r),
+                };
+                self.compile_statement(stmt)
+            }
         }
     }
 
