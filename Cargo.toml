@@ -13,6 +13,7 @@ reqwest = { version = "0.13.1", features = ["gzip", "json"] }
 rust-embed = "8.11.0"
 rust-sitter = { version = "0.4.5", default-features = false, features = ["tree-sitter-standard"] }
 tokio = { version = "1.49.0", features = ["macros", "sync", "rt-multi-thread", "fs", "time"] }
+toml_edit = "0.24.0"
 tree-sitter = "0.25.2"
 
 [build-dependencies]

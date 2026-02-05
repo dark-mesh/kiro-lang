@@ -10,6 +10,7 @@ use std::fs;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::Command;
+use toml_edit::{DocumentMut, Item, Table, value};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -61,6 +62,187 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Create a new Kiro project
+    Create { project_name: String },
+    /// Add a dependency
+    Add { dependency: String },
+    /// Remove a dependency
+    Remove { dependency: String },
+}
+
+fn scaffold_project(project_name: &str) {
+    let path = PathBuf::from(project_name);
+    if path.exists() {
+        eprintln!("Error: Directory '{}' already exists.", project_name);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = fs::create_dir(&path) {
+        eprintln!("Error creating directory: {}", e);
+        std::process::exit(1);
+    }
+
+    let toml_content = format!(
+        r#"[package]
+            name = "{}"
+            entry = "main.kiro"
+
+            [dependencies]
+"#,
+        project_name
+    );
+
+    let main_kiro_content = format!(r#"print "Hello from {}!""#, project_name);
+
+    if let Err(e) = fs::write(path.join("kiro.toml"), toml_content) {
+        eprintln!("Error creating kiro.toml: {}", e);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = fs::write(path.join("main.kiro"), main_kiro_content) {
+        eprintln!("Error creating main.kiro: {}", e);
+        std::process::exit(1);
+    }
+
+    // Initialize Cargo Project in .kiro/
+    let dot_kiro_path = path.join(".kiro");
+    if let Err(e) = fs::create_dir(&dot_kiro_path) {
+        eprintln!("Error creating .kiro directory: {}", e);
+        std::process::exit(1);
+    }
+
+    // Run cargo init --bin
+    println!("Initializing Cargo project in .kiro/ ...");
+    let status = Command::new("cargo")
+        .args(["init", "--bin", "--name", project_name, "--edition", "2021"])
+        .current_dir(&dot_kiro_path)
+        .status();
+
+    match status {
+        Ok(s) => {
+            if !s.success() {
+                eprintln!("Warning: 'cargo init' failed. You may need to initialize it manually.");
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "Warning: Failed to run 'cargo init': {}. Is cargo installed?",
+                e
+            );
+        }
+    }
+
+    println!("✨ Created new Kiro project: {}", project_name);
+}
+
+fn handle_add(dep: &str) {
+    let kiro_toml_path = "kiro.toml";
+    if !std::path::Path::new(kiro_toml_path).exists() {
+        eprintln!("Error: kiro.toml not found. Are you in a Kiro project?");
+        std::process::exit(1);
+    }
+
+    // 1. Check for Reserved Prefix (std_)
+    let embedded_path = if dep.starts_with("std_") {
+        let key = dep.trim_start_matches("std_");
+        format!("{}/header.rs", key)
+    } else {
+        format!("{}/header.rs", dep)
+    };
+
+    if dep.starts_with("std_") {
+        if StdAssets::get(&embedded_path).is_none() {
+            eprintln!(
+                "Error: Module '{}' starts with reserved prefix 'std_' but is not part of the Kiro Standard Library.",
+                dep
+            );
+            std::process::exit(1);
+        }
+    }
+
+    // 2. Read and Parse kiro.toml
+    let content = fs::read_to_string(kiro_toml_path).unwrap();
+    let mut doc = content
+        .parse::<DocumentMut>()
+        .expect("Invalid kiro.toml format");
+
+    // 3. Determine Dependency Type
+    let is_embedded = StdAssets::get(&embedded_path).is_some();
+
+    // 4. Update kiro.toml
+    if !doc.as_table().contains_key("dependencies") {
+        doc["dependencies"] = Item::Table(Table::new());
+    }
+
+    if is_embedded {
+        doc["dependencies"][dep] = value("*");
+        println!("➕ Added embedded dependency '{}' to kiro.toml", dep);
+    } else {
+        // External or Manual
+        // If it starts with kiro_ but not embedded, maybe manual?
+        // For now, we treat standard cargo crates as default unless manual specified (user can edit later)
+        // But for this command, we assume external crate if not embedded.
+        doc["dependencies"][dep] = value("*");
+        println!("➕ Added external dependency '{}' to kiro.toml", dep);
+
+        // 5. Run cargo add (only for external)
+        let dot_kiro = std::path::Path::new(".kiro");
+        if dot_kiro.exists() {
+            println!("📦 Running 'cargo add {}' in .kiro/...", dep);
+            let status = Command::new("cargo")
+                .args(["add", dep])
+                .current_dir(dot_kiro)
+                .status();
+
+            if let Ok(s) = status {
+                if !s.success() {
+                    eprintln!("Warning: 'cargo add' failed.");
+                }
+            }
+        }
+    }
+
+    fs::write(kiro_toml_path, doc.to_string()).unwrap();
+}
+
+fn handle_remove(dep: &str) {
+    let kiro_toml_path = "kiro.toml";
+    if !std::path::Path::new(kiro_toml_path).exists() {
+        eprintln!("Error: kiro.toml not found. Are you in a Kiro project?");
+        std::process::exit(1);
+    }
+
+    // 1. Remove from kiro.toml
+    let content = fs::read_to_string(kiro_toml_path).unwrap();
+    let mut doc = content
+        .parse::<DocumentMut>()
+        .expect("Invalid kiro.toml format");
+
+    if let Some(deps) = doc
+        .get_mut("dependencies")
+        .and_then(|d| d.as_table_like_mut())
+    {
+        if deps.remove(dep).is_some() {
+            println!("➖ Removed '{}' from kiro.toml", dep);
+        } else {
+            eprintln!("Warning: Dependency '{}' not found in kiro.toml", dep);
+        }
+    }
+
+    fs::write(kiro_toml_path, doc.to_string()).unwrap();
+
+    // 2. Run cargo remove (if applicable, though we assume we just try it)
+    let dot_kiro = std::path::Path::new(".kiro");
+    if dot_kiro.exists() {
+        // We only really need to remove if it was an external crate, but cargo remove is safe to run even if not present usually?
+        // Or we can check if it exists in Cargo.toml.
+        // Simple approach: try cargo remove, ignore failure if not found.
+        println!("📦 Running 'cargo remove {}' in .kiro/...", dep);
+        let _ = Command::new("cargo")
+            .args(["remove", dep])
+            .current_dir(dot_kiro)
+            .status();
+    }
 }
 
 #[tokio::main]
@@ -92,6 +274,15 @@ async fn main() {
             if run_compiler(&file, *emit_rust, *verbose).is_err() {
                 std::process::exit(1);
             }
+        }
+        Some(Commands::Create { project_name }) => {
+            scaffold_project(project_name);
+        }
+        Some(Commands::Add { dependency }) => {
+            handle_add(dependency);
+        }
+        Some(Commands::Remove { dependency }) => {
+            handle_remove(dependency);
         }
         None => {
             if let Some(file) = &cli.file {
@@ -227,6 +418,10 @@ fn execute_binary(path: PathBuf) -> Result<(), String> {
 #[derive(rust_embed::RustEmbed)]
 #[folder = "src/kiro_std/"]
 pub struct StdAssets;
+
+#[derive(rust_embed::RustEmbed)]
+#[folder = "kiro_runtime/"]
+pub struct RuntimeAssets;
 
 fn build_recursive(
     name: &str,
