@@ -1,0 +1,118 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-kiro-red: #dc2626;
+	--color-kiro-red-light: #ef4444;
+	--color-kiro-red-dark: #991b1b;
+	--color-kiro-red-glow: #dc262640;
+	--color-kiro-bg: #0a0a0a;
+	--color-kiro-surface: #111111;
+	--color-kiro-surface-2: #1a1a1a;
+	--color-kiro-border: #262626;
+	--color-kiro-text: #e5e5e5;
+	--color-kiro-text-dim: #a3a3a3;
+	--color-kiro-text-muted: #737373;
+}
+
+/* ── Base ──────────────────────────────────────── */
+html {
+	scroll-behavior: smooth;
+}
+body {
+	background-color: var(--color-kiro-bg);
+	color: var(--color-kiro-text);
+	font-size: 16px;
+	font-family:
+		'Inter',
+		system-ui,
+		-apple-system,
+		sans-serif;
+}
+::selection {
+	background-color: var(--color-kiro-red);
+	color: white;
+}
+
+/* ── Code blocks ──────────────────────────────── */
+pre {
+	background-color: #0d0d0d !important;
+	border: 1px solid var(--color-kiro-border);
+	border-radius: 0.75rem;
+	padding: 1.25rem 1.5rem;
+	overflow-x: auto;
+	font-size: 0.95rem;
+	line-height: 1.75;
+}
+code {
+	font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+	font-size: 0.92em;
+}
+:not(pre) > code {
+	background-color: var(--color-kiro-surface-2);
+	padding: 0.2em 0.45em;
+	border-radius: 0.25rem;
+	color: var(--color-kiro-red-light);
+	font-size: 0.92em;
+}
+
+/* ── Prose overrides for tutorial / extension ── */
+.prose {
+	--tw-prose-body: var(--color-kiro-text);
+	--tw-prose-headings: white;
+	--tw-prose-links: var(--color-kiro-red-light);
+	--tw-prose-bold: white;
+	--tw-prose-code: var(--color-kiro-red-light);
+	--tw-prose-pre-bg: #0d0d0d;
+	--tw-prose-pre-code: var(--color-kiro-text);
+	--tw-prose-hr: var(--color-kiro-border);
+	--tw-prose-th-borders: var(--color-kiro-border);
+	--tw-prose-td-borders: var(--color-kiro-border);
+	font-size: 1.05rem;
+	line-height: 1.85;
+}
+.prose p {
+	margin-bottom: 1.25em;
+}
+.prose li {
+	margin-top: 0.5em;
+	margin-bottom: 0.5em;
+	line-height: 1.8;
+}
+.prose a {
+	color: var(--color-kiro-red-light);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+.prose a:hover {
+	color: var(--color-kiro-red);
+}
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+	color: white;
+	font-weight: 700;
+	margin-top: 2rem;
+	margin-bottom: 1rem;
+}
+.prose h2 {
+	border-bottom: 1px solid var(--color-kiro-border);
+	padding-bottom: 0.5rem;
+	margin-top: 2.5rem;
+}
+.prose strong {
+	color: white;
+}
+.prose ul > li::marker {
+	color: var(--color-kiro-red);
+}
+.prose ol > li::marker {
+	color: var(--color-kiro-red);
+}
+
+/* ── Glow effect utility ──────────────────────── */
+.glow-red {
+	box-shadow:
+		0 0 40px var(--color-kiro-red-glow),
+		0 0 80px var(--color-kiro-red-glow);
+}
